@@ -1,4 +1,5 @@
 include $(WORKDIR)/initrd/modules/list/common.mk
 
 MODS=\
-$(COMMON_MODS)
+$(COMMON_MODS) \
+misc/timertester
