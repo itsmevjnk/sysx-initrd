@@ -7,7 +7,7 @@
 /* KERNEL MODULE INITIALIZATION FUNCTION */
 int32_t kmod_init() {
     if(timer_tick == 0) {
-        printf("System timer seems to not be working (tick is still 0), exiting to avoid hangs");
+        kprintf("System timer seems to not be working (tick is still 0), exiting to avoid hangs");
         return -1;
     }
     timer_tick_t t_start = timer_tick;
