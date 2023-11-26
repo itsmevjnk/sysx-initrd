@@ -1,10 +1,13 @@
 #include <kmod.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include <kernel/log.h>
 #include <hal/keyboard.h>
 #include <arch/x86/i8259.h>
 #include <hal/timer.h>
+#include <kernel/cmdline.h>
 
 #include "ps2_io.h"
 
@@ -145,18 +148,27 @@ static bool ps2_post_identify(uint8_t port) {
         ps2_ports[port].kbd.enabled = true;
         ps2_ports[port].kbd.id = kbd_register(NULL); // default keymap
         ps2_ports[port].kbd.brk = false;
-        if(!ps2_send_data_ack(port, PS2_DEVCMD_KBD_SCSET)) {
-            kerror("communication failure on port %u sending PS2_DEVCMD_KBD_SCSET cmd", port);
-            return false;
+
+        /* check for scancode set override in kernel cmdline */
+        char override_key[] = "i8042_p#scs"; override_key[7] = port + '0';
+        char* override_scs = cmdline_find_kvp(override_key);
+        if(override_scs != NULL) {
+            ps2_ports[port].kbd.scset = strtoul(override_scs, NULL, 10);
+            kdebug("port %u keyboard scancode set overridden to %u by kernel cmdline", port, ps2_ports[port].kbd.scset);
+        } else {
+            if(!ps2_send_data_ack(port, PS2_DEVCMD_KBD_SCSET)) {
+                kerror("communication failure on port %u sending PS2_DEVCMD_KBD_SCSET cmd", port);
+                return false;
+            }
+            if(!ps2_send_data_ack(port, 0)) { // get scancode set
+                kerror("communication failure on port %u sending PS2_DEVCMD_KBD_SCSET argument", port);
+                return false;
+            }
+            if(!ps2_data_read_timeout(port, &ps2_ports[port].kbd.scset)) {
+                kerror("timed out waiting on port %u for scancode set", port);
+                return false;
+            } else kdebug("keyboard on port %u uses scancode set %u", port, ps2_ports[port].kbd.scset);
         }
-        if(!ps2_send_data_ack(port, 0)) { // get scancode set
-            kerror("communication failure on port %u sending PS2_DEVCMD_KBD_SCSET argument", port);
-            return false;
-        }
-        if(!ps2_data_read_timeout(port, &ps2_ports[port].kbd.scset)) {
-            kerror("timed out waiting on port %u for scancode set", port);
-            return false;
-        } else kdebug("keyboard on port %u uses scancode set %u", port, ps2_ports[port].kbd.scset);
     }
 
     return true;
@@ -201,6 +213,15 @@ static bool ps2_reset_device(uint8_t port) {
     } else {
         kerror("resetting on port %u: timed out waiting for 1st byte", port);
         return false;
+    }
+
+    /* check for override in cmdline */
+    char override_key[] = "i8042_p#id"; // we'll replace # by the port number here
+    override_key[7] = port + '0';
+    char* override_id = cmdline_find_kvp(override_key);
+    if(override_id != NULL) {
+        ps2_ports[port].id = strtoul(override_id, NULL, 16);
+        kdebug("port %u device ID overridden to 0x%04x by kernel cmdline", port, ps2_ports[port].id);
     }
 
     if(!ps2_post_identify(port)) { // perform post-identification tasks (e.g. device specific setup))
