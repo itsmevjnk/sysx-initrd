@@ -167,7 +167,16 @@ static bool ps2_post_identify(uint8_t port) {
             if(!ps2_data_read_timeout(port, &ps2_ports[port].kbd.scset)) {
                 kerror("timed out waiting on port %u for scancode set", port);
                 return false;
-            } else kdebug("keyboard on port %u uses scancode set %u", port, ps2_ports[port].kbd.scset);
+            } else {
+                /* handle "translated" results sent by certain hardware such as VMware */
+                switch(ps2_ports[port].kbd.scset) {
+                    case 0x43: ps2_ports[port].kbd.scset = 1; break;
+                    case 0x41: ps2_ports[port].kbd.scset = 2; break;
+                    case 0x3F: ps2_ports[port].kbd.scset = 3; break;
+                    default: break;
+                }
+                kdebug("keyboard on port %u uses scancode set %u", port, ps2_ports[port].kbd.scset);
+            }
         }
     }
 
