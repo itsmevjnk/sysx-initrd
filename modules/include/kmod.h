@@ -3,5 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <kernel/log.h>
+#include <kernel/cmdline.h>
 
 #endif
