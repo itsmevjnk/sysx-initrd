@@ -45,10 +45,31 @@ static vbe_mode_t* vbe_find_mode(size_t width, size_t height, size_t bpp) {
     } else return &vbe_modes[idx];
 }
 
+static bool vbe_unload_handler(fbuf_t* impl) {
+    vmm_unmap(vmm_kernel, impl->framebuffer, impl->pitch * impl->height); // unmap framebuffer from memory
+    return true;
+}
+
 int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
-    (void) load_result; (void) load_result_len;
-    
     kinfo("Generic VESA BIOS Extensions driver for SysX");
+
+    /* check if cmdline specifies that the kernel will use this driver */
+    char* fbdrv_override = cmdline_find_kvp("fbdrv");
+    if(fbdrv_override != NULL) {
+        if(!strcmp(fbdrv_override, "vbe_generic")) {
+            kinfo("force-loading module as specified by kernel cmdline");
+            if(fbuf_impl != NULL) {
+                kinfo("unloading existing framebuffer implementation");
+                fbuf_unload();
+            }
+        } else {
+            kerror("kernel cmdline specifies another framebuffer driver module - exiting");
+            return -11;
+        }
+    } else if(fbuf_impl != NULL) {
+        kerror("another framebuffer driver module has been loaded - exiting");
+        return -10;
+    }
 
     vmm_pgmap(vmm_current, VBE_DATA_PADDR, VBE_DATA_VADDR, VMM_FLAGS_PRESENT | VMM_FLAGS_RW);
 
@@ -181,7 +202,10 @@ shrink:
     }
     vbe_fbuf_impl.framebuffer = vbe_framebuffer;
     vbe_fbuf_impl.backbuffer = NULL; vbe_fbuf_impl.flip = NULL; // TODO: double buffering
-    
+
+    vbe_fbuf_impl.elf_segments = load_result; vbe_fbuf_impl.num_elf_segments = load_result_len;
+    vbe_fbuf_impl.unload = &vbe_unload_handler;
+
     fbuf_impl = &vbe_fbuf_impl;
     term_impl = &fbterm_hook;
 
