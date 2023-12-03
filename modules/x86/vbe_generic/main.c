@@ -45,7 +45,9 @@ static vbe_mode_t* vbe_find_mode(size_t width, size_t height, size_t bpp) {
     } else return &vbe_modes[idx];
 }
 
-int32_t kmod_init() {
+int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
+    (void) load_result; (void) load_result_len;
+    
     kinfo("Generic VESA BIOS Extensions driver for SysX");
 
     vmm_pgmap(vmm_current, VBE_DATA_PADDR, VBE_DATA_VADDR, VMM_FLAGS_PRESENT | VMM_FLAGS_RW);
@@ -185,5 +187,6 @@ shrink:
 
     memset(vbe_fbuf_impl.framebuffer, 0, vbe_fbuf_impl.pitch * vbe_fbuf_impl.height); // clear framebuffer
 
+    vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
     return 0;
 }

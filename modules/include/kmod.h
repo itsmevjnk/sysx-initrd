@@ -6,5 +6,6 @@
 #include <stdbool.h>
 #include <kernel/log.h>
 #include <kernel/cmdline.h>
+#include <exec/elf.h>
 
 #endif

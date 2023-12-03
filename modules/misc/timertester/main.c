@@ -5,7 +5,8 @@
 #define TIMER_DURATION              5000000UL // timer duration to wait for until exiting
 
 /* KERNEL MODULE INITIALIZATION FUNCTION */
-int32_t kmod_init() {
+int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
+    (void) load_result; (void) load_result_len;
     if(timer_tick == 0) {
         kprintf("System timer seems to not be working (tick is still 0), exiting to avoid hangs");
         return -1;

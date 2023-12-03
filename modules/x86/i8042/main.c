@@ -244,7 +244,9 @@ static bool ps2_reset_device(uint8_t port) {
 
 /* KERNEL MODULE INITIALIZATION */
 
-int32_t kmod_init() {
+int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
+    (void) load_result; (void) load_result_len;
+    
     kinfo("Intel 8042 PS/2 controller driver for SysX");
 
     ps2_ports[0].ok = false; ps2_ports[1].ok = false;
