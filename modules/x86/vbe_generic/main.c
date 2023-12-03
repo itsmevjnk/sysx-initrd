@@ -46,7 +46,7 @@ static vbe_mode_t* vbe_find_mode(size_t width, size_t height, size_t bpp) {
 }
 
 static bool vbe_unload_handler(fbuf_t* impl) {
-    vmm_unmap(vmm_kernel, impl->framebuffer, impl->pitch * impl->height); // unmap framebuffer from memory
+    vmm_unmap(vmm_kernel, (uintptr_t) impl->framebuffer, impl->pitch * impl->height); // unmap framebuffer from memory
     return true;
 }
 
@@ -54,7 +54,7 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
     kinfo("Generic VESA BIOS Extensions driver for SysX");
 
     /* check if cmdline specifies that the kernel will use this driver */
-    char* fbdrv_override = cmdline_find_kvp("fbdrv");
+    const char* fbdrv_override = cmdline_find_kvp("fbdrv");
     if(fbdrv_override != NULL) {
         if(!strcmp(fbdrv_override, "vbe_generic")) {
             kinfo("force-loading module as specified by kernel cmdline");
@@ -136,7 +136,7 @@ shrink:
     kdebug("found %u usable video mode(s)", vbe_modes_len);
 
     /* check for video mode override in cmdline */
-    char* mode_override = cmdline_find_kvp("vbe_mode");
+    const char* mode_override = cmdline_find_kvp("vbe_mode");
     if(mode_override != NULL) {
         uint16_t mode = strtoul(mode_override, NULL, 16);
         for(size_t i = 0; i < vbe_modes_len; i++) {
@@ -152,8 +152,8 @@ shrink:
     if(vbe_mode_current == NULL) {
         mode_override = cmdline_find_kvp("resolution");
         if(mode_override != NULL) {
-            size_t width = strtoul(mode_override, &mode_override, 10);
-            size_t height = strtoul(&mode_override[1], &mode_override, 10);
+            size_t width = strtoul(mode_override, (char**) &mode_override, 10);
+            size_t height = strtoul(&mode_override[1], (char**) &mode_override, 10);
             size_t bpp = (*mode_override == '\0') ? 0 : strtoul(&mode_override[1], NULL, 10); // bpp is optional; if not specified, the driver will find the highest possible BPP mode
             vbe_mode_current = vbe_find_mode(width, height, bpp);
         }

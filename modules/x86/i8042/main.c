@@ -151,7 +151,7 @@ static bool ps2_post_identify(uint8_t port) {
 
         /* check for scancode set override in kernel cmdline */
         char override_key[] = "i8042_p#scs"; override_key[7] = port + '0';
-        char* override_scs = cmdline_find_kvp(override_key);
+        const char* override_scs = cmdline_find_kvp(override_key);
         if(override_scs != NULL) {
             ps2_ports[port].kbd.scset = strtoul(override_scs, NULL, 10);
             kdebug("port %u keyboard scancode set overridden to %u by kernel cmdline", port, ps2_ports[port].kbd.scset);
@@ -227,7 +227,7 @@ static bool ps2_reset_device(uint8_t port) {
     /* check for override in cmdline */
     char override_key[] = "i8042_p#id"; // we'll replace # by the port number here
     override_key[7] = port + '0';
-    char* override_id = cmdline_find_kvp(override_key);
+    const char* override_id = cmdline_find_kvp(override_key);
     if(override_id != NULL) {
         ps2_ports[port].id = strtoul(override_id, NULL, 16);
         kdebug("port %u device ID overridden to 0x%04x by kernel cmdline", port, ps2_ports[port].id);

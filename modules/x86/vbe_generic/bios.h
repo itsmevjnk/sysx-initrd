@@ -80,7 +80,6 @@ static vbe_ctrlinfo_t* vbe_get_ctrlinfo() {
 }
 
 static vbe_modeinfo_t* vbe_get_modeinfo(uint16_t mode) {
-    vbe_modeinfo_t* result = (vbe_modeinfo_t*) VBE_DATA_VADDR;
     int32_regs_t regs; memset(&regs, 0, sizeof(int32_regs_t));
     regs.ax = 0x4F01; regs.cx = mode; regs.es = ((VBE_DATA_PADDR >> 16) << 12); regs.di = (VBE_DATA_PADDR & 0xFFFF);
     int32(0x10, &regs);
