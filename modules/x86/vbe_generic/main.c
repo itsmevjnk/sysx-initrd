@@ -104,7 +104,7 @@ int32_t kmod_init() {
             goto shrink;
         }
         vbe_modes[i].width = mode->width; vbe_modes[i].height = mode->height; vbe_modes[i].bpp = mode->bpp; vbe_modes[i].pitch = mode->pitch; vbe_modes[i].framebuffer_ptr = mode->framebuffer;
-        kdebug("mode 0x%x: %ux%ux%u, framebuffer ptr 0x%x (%u bytes)", vbe_modes[i].mode, vbe_modes[i].width, vbe_modes[i].height, vbe_modes[i].bpp, vbe_modes[i].framebuffer_ptr, vbe_modes[i].pitch * vbe_modes[i].height);
+        // kdebug("mode 0x%x: %ux%ux%u, framebuffer ptr 0x%x (%u bytes)", vbe_modes[i].mode, vbe_modes[i].width, vbe_modes[i].height, vbe_modes[i].bpp, vbe_modes[i].framebuffer_ptr, vbe_modes[i].pitch * vbe_modes[i].height);
         continue;
 shrink: 
         if(i != vbe_modes_len - 1) memmove(&vbe_modes[i], &vbe_modes[i + 1], (vbe_modes_len - i - 1) * sizeof(vbe_mode_t));
