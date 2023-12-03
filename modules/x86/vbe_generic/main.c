@@ -56,11 +56,12 @@ int32_t kmod_init() {
     if(ctrlinfo == NULL) {
         kerror("VBE is not supported");
         return -1;
-    } else kinfo("Video card supports VBE %u.%u, VRAM size: %uK", ctrlinfo->ver_maj, ctrlinfo->ver_min, ctrlinfo->memory * 64);
+    } else kinfo("video card supports VBE %u.%u, VRAM size: %uK", ctrlinfo->ver_maj, ctrlinfo->ver_min, ctrlinfo->memory * 64);
 
     /* parse video modes list */
     kdebug("discovering video modes");
     uint16_t* modes = (uint16_t*) VBE_LINEAR_ADDR(ctrlinfo->modes_seg, ctrlinfo->modes_off);
+    kinfo("VBE specifies video mode list at 0x%x", modes);
     bool map = false;
     if((uintptr_t) modes <= VBE_DATA_PADDR || (uintptr_t) modes >= VBE_DATA_PADDR + sizeof(vbe_ctrlinfo_t)) {
         /* map video modes to memory before proceeding */
@@ -181,6 +182,8 @@ shrink:
     
     fbuf_impl = &vbe_fbuf_impl;
     term_impl = &fbterm_hook;
+
+    memset(vbe_fbuf_impl.framebuffer, 0, vbe_fbuf_impl.pitch * vbe_fbuf_impl.height); // clear framebuffer
 
     return 0;
 }
