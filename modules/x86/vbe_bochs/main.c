@@ -2,6 +2,7 @@
 #include <mm/vmm.h>
 #include <mm/addr.h>
 #include <stdlib.h>
+#include <string.h>
 #include <drivers/pci.h>
 #include <hal/fbuf.h>
 #include "io.h"
@@ -13,29 +14,68 @@
 static pci_devtree_t* vbe_devtree_node = NULL;
 
 static fbuf_t vbe_fbuf_impl;
+static uintptr_t vbe_fbuf_base;
+static size_t vbe_fbuf_size;
 
 static bool vbe_unload_handler(fbuf_t* impl) {
     vmm_unmap(vmm_kernel, (uintptr_t) impl->framebuffer, impl->pitch * impl->height); // unmap framebuffer from memory
     return true;
 }
 
+static void vbe_scroll_up(fbuf_t* impl, size_t lines) {
+    uintptr_t new_ptr = (uintptr_t) impl->framebuffer + lines * impl->pitch; // new framebuffer ptr
+    if(new_ptr + impl->pitch * impl->height > vbe_fbuf_base + vbe_fbuf_size) {
+        /* framebuffer overrun - reset to top */
+        memmove((void*) vbe_fbuf_base, (void*) new_ptr, impl->pitch * (impl->height - lines));
+        vbe_write_reg(VBE_DISPI_INDEX_Y_OFFSET, 0);
+        impl->framebuffer = (void*) vbe_fbuf_base;
+    } else {
+        /* set new Y offset */
+        vbe_write_reg(VBE_DISPI_INDEX_Y_OFFSET, (new_ptr - vbe_fbuf_base) / impl->pitch);
+        impl->framebuffer = (void*) new_ptr;
+    }
+}
+
+static void vbe_scroll_down(fbuf_t* impl, size_t lines) {
+    uintptr_t new_ptr = (uintptr_t) impl->framebuffer - lines * impl->pitch; // new framebuffer ptr
+    if(new_ptr < vbe_fbuf_base) {
+        /* we can't go any further */
+        new_ptr = vbe_fbuf_base;
+        memmove((void*) new_ptr, impl->framebuffer, (impl->height - lines) * impl->pitch);
+    }
+    vbe_write_reg(VBE_DISPI_INDEX_Y_OFFSET, (new_ptr - vbe_fbuf_base) / impl->pitch);
+    impl->framebuffer = (void*) new_ptr;
+}
+
 int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
+    /* check device availability */
     vbe_devtree_node = (pci_devtree_t*) devtree_traverse_path(NULL, "/pci/by-id/1234:1111");
     if(vbe_devtree_node == NULL) {
         kdebug("BGA device not present");
         return -1;
     } else kdebug("found BGA device on %02x:%02x.%x", vbe_devtree_node->bus, vbe_devtree_node->dev, vbe_devtree_node->func);
+    if(mutex_test(&vbe_devtree_node->header.in_use)) {
+        kerror("BGA device is in use");
+        return -3;
+    }
+
+    /* check BGA version */
     uint16_t vbe_id = vbe_read_reg(VBE_DISPI_INDEX_ID);
-    if(vbe_id < VBE_DISPI_ID2 || vbe_id > VBE_DISPI_ID5) {
+    if(vbe_id < VBE_DISPI_ID2) {
         kdebug("unsupported BGA version 0x%04x", vbe_id);
         return -2;
     } else kdebug("BGA version 0x%04x", vbe_id);
-    vbe_fbuf_impl.framebuffer = (void*) pci_cfg_read_dword(vbe_devtree_node->bus, vbe_devtree_node->dev, vbe_devtree_node->func, PCI_CFG_H1_BAR0);
-    if((uintptr_t) vbe_fbuf_impl.framebuffer & 1) {
+
+    /* get framebuffer base and size */
+    vbe_fbuf_base = pci_cfg_read_dword(vbe_devtree_node->bus, vbe_devtree_node->dev, vbe_devtree_node->func, PCI_CFG_H1_BAR0);
+    if(vbe_fbuf_base & 1) {
         kerror("BAR0 of BGA device is not a memory address - invalid device?");
         return -1;
     }
-    vbe_fbuf_impl.framebuffer = (void*) ((uintptr_t) vbe_fbuf_impl.framebuffer & 0xFFFFFFF0);
+    vbe_fbuf_base &= 0xFFFFFFF0;
+    vbe_fbuf_size = vbe_read_reg(VBE_DISPI_INDEX_VIDEO_MEMORY_64K) * 65536;
+    kdebug("framebuffer base: 0x%x, size: %uK", vbe_fbuf_base, vbe_fbuf_size / 1024);
+
     vbe_fbuf_impl.elf_segments = load_result; vbe_fbuf_impl.num_elf_segments = load_result_len;
     vbe_fbuf_impl.unload = &vbe_unload_handler;
 
@@ -82,13 +122,17 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
         case 32: vbe_fbuf_impl.type = FBUF_32BPP_RGB888; vbe_fbuf_impl.pitch = mode_w * 4; break;
     }
     vbe_fbuf_impl.backbuffer = NULL; vbe_fbuf_impl.flip = NULL; // TODO: double buffering
+    vbe_fbuf_impl.scroll_up = &vbe_scroll_up; vbe_fbuf_impl.scroll_down = &vbe_scroll_down;
 
     /* map framebuffer */
-    vbe_fbuf_impl.framebuffer = (void*) vmm_alloc_map(vmm_kernel, (uintptr_t) vbe_fbuf_impl.framebuffer, vbe_fbuf_impl.pitch * mode_h, kernel_end, UINTPTR_MAX, false, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
-    if(vbe_fbuf_impl.framebuffer == NULL) {
+    vbe_fbuf_base = vmm_alloc_map(vmm_kernel, vbe_fbuf_base, vbe_fbuf_size, kernel_end, UINTPTR_MAX, false, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
+    if(!vbe_fbuf_base) {
         kerror("cannot map framebuffer");
-        return -3;
+        return -4;
     }
+    vbe_fbuf_impl.framebuffer = (void*) vbe_fbuf_base;
+
+    mutex_acquire(&vbe_devtree_node->header.in_use); // lock device for exclusive use
 
     /* set video mode */
     kinfo("setting video mode to %ux%ux%u", mode_w, mode_h, mode_bpp);

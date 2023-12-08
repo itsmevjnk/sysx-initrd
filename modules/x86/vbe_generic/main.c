@@ -202,6 +202,7 @@ shrink:
     }
     vbe_fbuf_impl.framebuffer = vbe_framebuffer;
     vbe_fbuf_impl.backbuffer = NULL; vbe_fbuf_impl.flip = NULL; // TODO: double buffering
+    vbe_fbuf_impl.scroll_up = NULL; vbe_fbuf_impl.scroll_down = NULL;
 
     vbe_fbuf_impl.elf_segments = load_result; vbe_fbuf_impl.num_elf_segments = load_result_len;
     vbe_fbuf_impl.unload = &vbe_unload_handler;

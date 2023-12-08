@@ -19,6 +19,7 @@
 #define VBE_DISPI_INDEX_VIRT_HEIGHT         7
 #define VBE_DISPI_INDEX_X_OFFSET            8
 #define VBE_DISPI_INDEX_Y_OFFSET            9
+#define VBE_DISPI_INDEX_VIDEO_MEMORY_64K    10
 
 /* enable/disable VBE */
 #define VBE_DISPI_DISABLED                  0x00
