@@ -19,6 +19,7 @@
 #define PS2_P2_IRQNUM           12
 
 #define PS2_DATA_TIMEOUT        100000UL // response timeout in microseconds
+#define PS2_RESET_TIMEOUT       1000000UL // device reset response timeout in microseconds
 #define PS2_DATA_BUFLEN         8 // data ring buffer length
 #define PS2_DATA_RETRIES        3 // maximum number of retries for sending data
 
@@ -81,7 +82,7 @@ static void ps2_irq_handler(uint8_t irq, void* context) {
     if(ps2_ports[port].parse) {
         if(ps2_ports[port].kbd.enabled) ps2_kbd_handler(port, data);
     } else {
-        if((ps2_ports[port].data_wridx + 1) % PS2_DATA_BUFLEN == ps2_ports[port].data_rdidx) kwarn("PS/2 port %u buffer is full", port);
+        if((ps2_ports[port].data_wridx + 1) % PS2_DATA_BUFLEN == ps2_ports[port].data_rdidx) kwarn("PS/2 port %u (ID 0x%x) buffer is full (data 0x%02x)", port, ps2_ports[port].id, data);
         else {
             ps2_ports[port].data[ps2_ports[port].data_wridx] = data;
             ps2_ports[port].data_wridx = (ps2_ports[port].data_wridx + 1) % PS2_DATA_BUFLEN;
@@ -110,10 +111,13 @@ static uint8_t ps2_data_read(uint8_t port) {
     return ret;
 }
 
-static bool ps2_data_read_timeout(uint8_t port, uint8_t* data) {
+static bool ps2_data_read_timeout(uint8_t port, uint8_t* data, timer_tick_t timeout) {
     timer_tick_t t_start = timer_tick;
-    while(timer_tick - t_start < PS2_DATA_TIMEOUT) {
-        if(ps2_data_available(port) > 0) break;
+    while(timer_tick - t_start < timeout) {
+        if(ps2_data_available(port) > 0) {
+            // kdebug("got response after %u", (size_t) (timer_tick - t_start));
+            break;
+        }
     }
     if(ps2_data_available(port) > 0) {
         *data = ps2_data_read(port);
@@ -127,7 +131,7 @@ static bool ps2_send_data_ack(uint8_t port, uint8_t data) {
     for(size_t i = 0; i < PS2_DATA_RETRIES; i++) {
         ps2_send_data(port, data);
         uint8_t resp;
-        if(!ps2_data_read_timeout(port, &resp)) return false; // timed out waiting for response
+        if(!ps2_data_read_timeout(port, &resp, PS2_DATA_TIMEOUT)) return false; // timed out waiting for response
         switch(resp) {
             case PS2_DEVRESP_ACK: return true; // command acknowledged
             case PS2_DEVRESP_RESEND: continue; // retry
@@ -164,7 +168,7 @@ static bool ps2_post_identify(uint8_t port) {
                 kerror("communication failure on port %u sending PS2_DEVCMD_KBD_SCSET argument", port);
                 return false;
             }
-            if(!ps2_data_read_timeout(port, &ps2_ports[port].kbd.scset)) {
+            if(!ps2_data_read_timeout(port, &ps2_ports[port].kbd.scset, PS2_DATA_TIMEOUT)) {
                 kerror("timed out waiting on port %u for scancode set", port);
                 return false;
             } else {
@@ -188,26 +192,26 @@ static bool ps2_reset_device(uint8_t port) {
     ps2_data_reset_buf(port); // discard any pending data
     ps2_send_data(port, PS2_DEVCMD_RESET);
     uint8_t resp_1;
-    if(ps2_data_read_timeout(port, &resp_1)) {
+    if(ps2_data_read_timeout(port, &resp_1, PS2_RESET_TIMEOUT)) {
         if(resp_1 != 0xFA && resp_1 != 0xAA) {
             kerror("resetting on port %u: unexpected 1st byte 0x%02x", port, resp_1);
             return false;
-        }
+        } else kdebug("resetting on port %u: received 1st byte 0x%02x", port, resp_1);
 
         uint8_t resp_2;
-        if(ps2_data_read_timeout(port, &resp_2)) {
+        if(ps2_data_read_timeout(port, &resp_2, PS2_RESET_TIMEOUT)) {
             if(!((resp_1 == 0xFA && resp_2 == 0xAA) || (resp_1 == 0xAA && resp_2 == 0xFA))) {
                 kerror("resetting on port %u: unexpected 2nd byte 0x%02x (1st byte 0x%02x)", port, resp_2, resp_1);
                 return false;
-            }
+            } else kdebug("resetting on port %u: received 2nd byte 0x%02x", port, resp_2);
 
             /* get ID */
             ps2_ports[port].id = 0;
-            if(ps2_data_read_timeout(port, (uint8_t*)&ps2_ports[port].id)) {
+            if(ps2_data_read_timeout(port, (uint8_t*)&ps2_ports[port].id, PS2_DATA_TIMEOUT)) {
                 if(ps2_ports[port].id == 0xAB || ps2_ports[port].id == 0xAC) {
                     /* additional ID byte awaits */
                     ps2_ports[port].id <<= 8;
-                    if(ps2_data_read_timeout(port, (uint8_t*)&ps2_ports[port].id)) {
+                    if(ps2_data_read_timeout(port, (uint8_t*)&ps2_ports[port].id, PS2_DATA_TIMEOUT)) {
                         ps2_ports[port].id = (ps2_ports[port].id << 8) | ps2_data_read(port);
                     } else kwarn("resetting on port %u: timed out waiting for expected 2nd ID byte", port);
                 }
