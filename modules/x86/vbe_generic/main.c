@@ -224,13 +224,12 @@ shrink:
     vbe_fbuf_impl.elf_segments = load_result; vbe_fbuf_impl.num_elf_segments = load_result_len;
     vbe_fbuf_impl.unload = &vbe_unload_handler;
 
-    memset(vbe_fbuf_impl.framebuffer, 0, fb_size); // clear framebuffer
     if(vbe_fbuf_impl.backbuffer != NULL) {
-        /* clear and unset dirty bit for backbuffer */
+        /* clear backbuffer - this will be updated to the framebuffer on the next refresh */
         memset(vbe_fbuf_impl.backbuffer, 0, fb_size);
-        for(size_t off = 0; off < fb_size; off += 4096) vmm_set_dirty(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off, false);
         vbe_fbuf_impl.tick_flip = timer_tick;
-    }
+        vbe_fbuf_impl.flip_all = true; // update changes to framebuffer later
+    } else memset(vbe_fbuf_impl.framebuffer, 0, fb_size); // clear framebuffer only
 
     fbuf_impl = &vbe_fbuf_impl;
     term_impl = &fbterm_hook;
