@@ -1,5 +1,6 @@
 #include <kmod.h>
 #include <mm/vmm.h>
+#include <mm/pmm.h>
 #include <mm/addr.h>
 #include <stdlib.h>
 #include <hal/fbuf.h>
@@ -172,13 +173,33 @@ shrink:
 
     /* find virtual address space for framebuffer */
     size_t fb_size = vbe_mode_current->pitch * vbe_mode_current->height;
-    vbe_framebuffer = (void*) vmm_first_free(vmm_current, kernel_end, 0xFFFFFFFF, fb_size, false);
+    vbe_framebuffer = (void*) vmm_first_free(vmm_current, kernel_end, UINTPTR_MAX, fb_size, false);
     if(vbe_framebuffer == NULL) {
         kerror("cannot find virtual address space for framebuffer");
         kfree(vbe_modes);
         vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
         return -5;
-    } else kinfo("framebuffer: 0x%x, size: %u bytes", vbe_framebuffer, fb_size);
+    } else kdebug("allocated framebuffer at 0x%x, size: %u bytes", vbe_framebuffer, fb_size);
+    vmm_map(vmm_current, vbe_mode_current->framebuffer_ptr, (uintptr_t) vbe_framebuffer, fb_size, VMM_FLAGS_PRESENT | VMM_FLAGS_RW | VMM_FLAGS_CACHE | VMM_FLAGS_GLOBAL); // writeback cache
+
+    /* allocate memory for backbuffer */
+    vbe_fbuf_impl.flip = NULL;
+    vbe_fbuf_impl.backbuffer = (void*) vmm_first_free(vmm_kernel, kernel_end, UINTPTR_MAX, fb_size, false);
+    if(vbe_fbuf_impl.backbuffer != NULL) {
+        for(size_t off = 0; off < fb_size; off += 4096) {
+            size_t frame = pmm_alloc_free(1);
+            if(frame == (size_t)-1) {
+                kerror("cannot allocate physical frame for backbuffer - double buffering will be unavailable");
+                for(size_t off2 = 0; off2 < off; off2 += 4096) {
+                    pmm_free(vmm_get_paddr(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off2) >> 12);
+                    vmm_pgunmap(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off2);
+                }
+                vbe_fbuf_impl.backbuffer = NULL;
+            }
+            vmm_pgmap(vmm_kernel, frame << 12, (uintptr_t) vbe_fbuf_impl.backbuffer + off, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
+        }
+        kdebug("allocated backbuffer at 0x%x", vbe_fbuf_impl.backbuffer);
+    } else kerror("cannot allocate virtual address space for backbuffer - double buffering will be unavailable");
 
     /* set video mode */
     kinfo("setting video mode to 0x%x (%ux%ux%u)", vbe_mode_current->mode, vbe_mode_current->width, vbe_mode_current->height, vbe_mode_current->bpp);
@@ -189,10 +210,7 @@ shrink:
         vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
         return -6;
     }
-
-    /* map framebuffer to virtual address space */
-    vmm_map(vmm_current, vbe_mode_current->framebuffer_ptr, (uintptr_t) vbe_framebuffer, fb_size, VMM_FLAGS_PRESENT | VMM_FLAGS_RW | VMM_FLAGS_CACHE | VMM_FLAGS_GLOBAL); // writeback cache
-
+    
     vbe_fbuf_impl.width = vbe_mode_current->width; vbe_fbuf_impl.height = vbe_mode_current->height; vbe_fbuf_impl.pitch = vbe_mode_current->pitch;
     switch(vbe_mode_current->bpp) {
         case 15: vbe_fbuf_impl.type = FBUF_15BPP_RGB555; break;
@@ -201,16 +219,21 @@ shrink:
         case 32: vbe_fbuf_impl.type = FBUF_32BPP_RGB888; break;
     }
     vbe_fbuf_impl.framebuffer = vbe_framebuffer;
-    vbe_fbuf_impl.backbuffer = NULL; vbe_fbuf_impl.flip = NULL; // TODO: double buffering
     vbe_fbuf_impl.scroll_up = NULL; vbe_fbuf_impl.scroll_down = NULL;
 
     vbe_fbuf_impl.elf_segments = load_result; vbe_fbuf_impl.num_elf_segments = load_result_len;
     vbe_fbuf_impl.unload = &vbe_unload_handler;
 
+    memset(vbe_fbuf_impl.framebuffer, 0, fb_size); // clear framebuffer
+    if(vbe_fbuf_impl.backbuffer != NULL) {
+        /* clear and unset dirty bit for backbuffer */
+        memset(vbe_fbuf_impl.backbuffer, 0, fb_size);
+        for(size_t off = 0; off < fb_size; off += 4096) vmm_set_dirty(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off, false);
+        vbe_fbuf_impl.tick_flip = timer_tick;
+    }
+
     fbuf_impl = &vbe_fbuf_impl;
     term_impl = &fbterm_hook;
-
-    memset(vbe_fbuf_impl.framebuffer, 0, vbe_fbuf_impl.pitch * vbe_fbuf_impl.height); // clear framebuffer
 
     vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
     return 0;
