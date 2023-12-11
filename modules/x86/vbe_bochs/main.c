@@ -125,7 +125,13 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
     vbe_fbuf_impl.scroll_up = &vbe_scroll_up; vbe_fbuf_impl.scroll_down = &vbe_scroll_down;
 
     /* map framebuffer */
-    vbe_fbuf_base = vmm_alloc_map(vmm_kernel, vbe_fbuf_base, vbe_fbuf_size, kernel_end, UINTPTR_MAX, false, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
+    size_t align = 0, max_idx = 0; // virtual address alignment and maximum page size index
+    if(vbe_fbuf_size % 4194304 == 0) {
+        /* use hugepage if possible */
+        align = 4194304;
+        max_idx = 1;
+    }
+    vbe_fbuf_base = vmm_alloc_map(vmm_kernel, vbe_fbuf_base, vbe_fbuf_size, kernel_end, UINTPTR_MAX, align, max_idx, false, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
     if(!vbe_fbuf_base) {
         kerror("cannot map framebuffer");
         return -4;

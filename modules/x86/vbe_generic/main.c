@@ -72,7 +72,7 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
         return -10;
     }
 
-    vmm_pgmap(vmm_current, VBE_DATA_PADDR, VBE_DATA_VADDR, VMM_FLAGS_PRESENT | VMM_FLAGS_RW);
+    vmm_pgmap(vmm_current, VBE_DATA_PADDR, VBE_DATA_VADDR, 0, VMM_FLAGS_PRESENT | VMM_FLAGS_RW);
 
     /* read controller info */
     kdebug("reading controller info");
@@ -90,27 +90,24 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
     if((uintptr_t) modes <= VBE_DATA_PADDR || (uintptr_t) modes >= VBE_DATA_PADDR + sizeof(vbe_ctrlinfo_t)) {
         /* map video modes to memory before proceeding */
         map = true; // so we'll remember to unmap it later
-        uintptr_t offset = (uintptr_t) modes & 0xFFF;
-        uintptr_t vaddr = vmm_first_free(vmm_current, 0, kernel_start, 4096, false);
-        if(vaddr == 0) {
+        modes = (uint16_t*) vmm_alloc_map(vmm_current, (uintptr_t) modes, 4096, kernel_end, UINTPTR_MAX, 0, 0, false, VMM_FLAGS_PRESENT);
+        if(modes == NULL) {
             kerror("cannot find virtual address space to map video modes list to");
-            vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+            vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
             return -2;
         }
-        vmm_pgmap(vmm_current, (uintptr_t) modes - offset, vaddr, VMM_FLAGS_PRESENT);
-        modes = (uint16_t*) (vaddr + offset);
     } else modes = (uint16_t*) ((uintptr_t) modes - VBE_DATA_PADDR + VBE_DATA_VADDR); // video modes table comes with the controller info struct
     for(; modes[vbe_modes_len] != 0xFFFF; vbe_modes_len++); // count modes
     kdebug("found %u video mode(s) in video mode list at 0x%x", vbe_modes_len, modes);
     vbe_modes = kcalloc(vbe_modes_len, sizeof(vbe_mode_t));
     if(vbe_modes == NULL) {
         kerror("cannot allocate video modes list");
-        if(map) vmm_pgunmap(vmm_current, (uintptr_t) modes);
-        vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+        if(map) vmm_pgunmap(vmm_current, (uintptr_t) modes, 0);
+        vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
         return -3;
     }
     for(size_t i = 0; i < vbe_modes_len; i++) vbe_modes[i].mode = modes[i]; // copy mode numbers over
-    if(map) vmm_pgunmap(vmm_current, (uintptr_t) modes); // unmap the video modes list
+    if(map) vmm_pgunmap(vmm_current, (uintptr_t) modes, 0); // unmap the video modes list
 
     /* get information on each mode */
     for(size_t i = 0; i < vbe_modes_len; i++) {
@@ -166,25 +163,24 @@ shrink:
         if(vbe_mode_current == NULL) {
             kerror("cannot find any suitable resolution");
             kfree(vbe_modes);
-            vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+            vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
             return -4;
         }   
     }
 
     /* find virtual address space for framebuffer */
     size_t fb_size = vbe_mode_current->pitch * vbe_mode_current->height;
-    vbe_framebuffer = (void*) vmm_first_free(vmm_current, kernel_end, UINTPTR_MAX, fb_size, false);
+    vbe_framebuffer = (void*) vmm_alloc_map(vmm_current, vbe_mode_current->framebuffer_ptr, fb_size, kernel_end, UINTPTR_MAX, 0, 0, false, VMM_FLAGS_PRESENT | VMM_FLAGS_RW | VMM_FLAGS_CACHE | VMM_FLAGS_GLOBAL); // writeback cache
     if(vbe_framebuffer == NULL) {
         kerror("cannot find virtual address space for framebuffer");
         kfree(vbe_modes);
-        vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+        vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
         return -5;
     } else kdebug("allocated framebuffer at 0x%x, size: %u bytes", vbe_framebuffer, fb_size);
-    vmm_map(vmm_current, vbe_mode_current->framebuffer_ptr, (uintptr_t) vbe_framebuffer, fb_size, VMM_FLAGS_PRESENT | VMM_FLAGS_RW | VMM_FLAGS_CACHE | VMM_FLAGS_GLOBAL); // writeback cache
 
     /* allocate memory for backbuffer */
     vbe_fbuf_impl.flip = NULL;
-    vbe_fbuf_impl.backbuffer = (void*) vmm_first_free(vmm_kernel, kernel_end, UINTPTR_MAX, fb_size, false);
+    vbe_fbuf_impl.backbuffer = (void*) vmm_first_free(vmm_kernel, kernel_end, UINTPTR_MAX, fb_size, 0, false);
     if(vbe_fbuf_impl.backbuffer != NULL) {
         for(size_t off = 0; off < fb_size; off += 4096) {
             size_t frame = pmm_alloc_free(1);
@@ -192,11 +188,11 @@ shrink:
                 kerror("cannot allocate physical frame for backbuffer - double buffering will be unavailable");
                 for(size_t off2 = 0; off2 < off; off2 += 4096) {
                     pmm_free(vmm_get_paddr(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off2) >> 12);
-                    vmm_pgunmap(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off2);
+                    vmm_pgunmap(vmm_kernel, (uintptr_t) vbe_fbuf_impl.backbuffer + off2, 0);
                 }
                 vbe_fbuf_impl.backbuffer = NULL;
             }
-            vmm_pgmap(vmm_kernel, frame << 12, (uintptr_t) vbe_fbuf_impl.backbuffer + off, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
+            vmm_pgmap(vmm_kernel, frame << 12, (uintptr_t) vbe_fbuf_impl.backbuffer + off, 0, VMM_FLAGS_PRESENT | VMM_FLAGS_GLOBAL | VMM_FLAGS_CACHE | VMM_FLAGS_RW);
         }
         kdebug("allocated backbuffer at 0x%x", vbe_fbuf_impl.backbuffer);
     } else kerror("cannot allocate virtual address space for backbuffer - double buffering will be unavailable");
@@ -207,7 +203,7 @@ shrink:
     if(!vbe_set_mode(vbe_mode_current->mode)) {
         kerror("setting video mode failed");
         kfree(vbe_modes);
-        vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+        vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
         return -6;
     }
     
@@ -234,6 +230,6 @@ shrink:
     fbuf_impl = &vbe_fbuf_impl;
     term_impl = &fbterm_hook;
 
-    vmm_pgunmap(vmm_current, VBE_DATA_VADDR);
+    vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
     return 0;
 }
