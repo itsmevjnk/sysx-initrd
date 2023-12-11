@@ -35,7 +35,7 @@ static vbe_mode_t* vbe_find_mode(size_t width, size_t height, size_t bpp) {
             if(bpp) { // chosen one right here
                 idx = i;
                 break;
-            } else if(vbe_modes[i].bpp > vbe_modes[idx].bpp) idx = i;
+            } else if(vbe_modes[i].bpp != 24 && vbe_modes[i].bpp > vbe_modes[idx].bpp) idx = i; // skip 24bpp modes to avoid performance impact
         }
     }
     
@@ -168,6 +168,8 @@ shrink:
         }   
     }
 
+    if(vbe_mode_current->bpp == 24) kwarn("using 24 BPP video mode - expect performance impacts");
+
     /* find virtual address space for framebuffer */
     size_t fb_size = vbe_mode_current->pitch * vbe_mode_current->height;
     vbe_framebuffer = (void*) vmm_alloc_map(vmm_current, vbe_mode_current->framebuffer_ptr, fb_size, kernel_end, UINTPTR_MAX, 0, 0, false, VMM_FLAGS_PRESENT | VMM_FLAGS_RW | VMM_FLAGS_CACHE | VMM_FLAGS_GLOBAL); // writeback cache
@@ -225,6 +227,7 @@ shrink:
         memset(vbe_fbuf_impl.backbuffer, 0, fb_size);
         vbe_fbuf_impl.tick_flip = timer_tick;
         vbe_fbuf_impl.flip_all = true; // update changes to framebuffer later
+        vbe_fbuf_impl.dbuf_direct_write = true;
     } else memset(vbe_fbuf_impl.framebuffer, 0, fb_size); // clear framebuffer only
 
     fbuf_impl = &vbe_fbuf_impl;
