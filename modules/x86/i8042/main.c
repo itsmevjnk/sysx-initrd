@@ -27,8 +27,8 @@ struct ps2_port_status {
     bool ok;
     uint16_t id;
     bool parse; // set to parse data according to ID
-    uint8_t data[PS2_DATA_BUFLEN];
-    uint8_t data_rdidx, data_wridx;
+    volatile uint8_t data[PS2_DATA_BUFLEN];
+    volatile uint8_t data_rdidx, data_wridx;
 
     /* keyboard handling */
     struct {
