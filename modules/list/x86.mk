@@ -4,4 +4,5 @@ MODS=\
 $(COMMON_MODS) \
 x86/i8042 \
 x86/vbe_bochs \
-x86/vbe_generic
+x86/vbe_generic \
+x86/ide_pci
