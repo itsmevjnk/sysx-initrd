@@ -28,20 +28,20 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
 
     for(size_t dr = 0; dr < 2; dr++) {
         /* select drive */
-        ide_write(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | ((dr) ? IDE_HDSR_DRV : 0));
+        ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | ((dr) ? IDE_HDSR_DRV : 0));
         timer_delay_ms(1); // give it some time to change
 
         /* send ATA identify command */
-        ide_write(channel, IDE_REG_CMD, ATA_CMD_ID);
+        ide_write_byte(channel, IDE_REG_CMD, ATA_CMD_ID);
         timer_delay_ms(1);
-        if(ide_read(channel, IDE_REG_STAT) == 0) {
+        if(ide_read_byte(channel, IDE_REG_STAT) == 0) {
             kdebug("no drives on %s drive %u (SR = 0)", channel->header.name, dr);
             continue; // next drive
         }
 
         bool atapi = false;
         while(1) {
-            uint8_t status = ide_read(channel, IDE_REG_STAT);
+            uint8_t status = ide_read_byte(channel, IDE_REG_STAT);
             if(status & IDE_SR_ERR) {
                 atapi = true; // not ATA (but could be ATAPI)
                 break;
@@ -51,13 +51,13 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
 
         if(atapi) {
             /* check for ATAPI */
-            uint8_t cl = ide_read(channel, IDE_REG_LBA1), ch = ide_read(channel, IDE_REG_LBA2);
+            uint8_t cl = ide_read_byte(channel, IDE_REG_LBA1), ch = ide_read_byte(channel, IDE_REG_LBA2);
             if((cl == 0x14 && ch == 0xEB) || (cl == 0x69 && ch == 0x96)) {
                 /* ATAPI device here */
-                ide_write(channel, IDE_REG_CMD, ATA_CMD_ID_PACKET);
+                ide_write_byte(channel, IDE_REG_CMD, ATA_CMD_ID_PACKET);
                 timer_delay_ms(1);
                 while(1) { // TODO: is this needed?
-                    uint8_t status = ide_read(channel, IDE_REG_STAT);
+                    uint8_t status = ide_read_byte(channel, IDE_REG_STAT);
                     if(status & IDE_SR_ERR) {
                         atapi = false; // not ATA and not ATAPI either - fail here
                         break;
@@ -78,7 +78,7 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
         if(!mutex_test(&channel->header.in_use)) mutex_acquire(&channel->header.in_use);
 
         /* read out the buffer */
-        ide_read_buf(channel, IDE_REG_DATA, (uint16_t*) buf, 256);
+        ide_read_word_n(channel, IDE_REG_DATA, (uint16_t*) buf, 256);
 
         /* store device information */
         ide_dev_devtree_t* dev = kcalloc(1, sizeof(ide_dev_devtree_t));

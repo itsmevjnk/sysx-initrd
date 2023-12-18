@@ -8,11 +8,11 @@
 #define ATA_IO_MAX_SECTORS                          256 // maximum number of sectors to access in one go (so that all tasks have a fairer chance of accessing the channel/drive)
 
 static int8_t ide_poll_channel(ide_channel_devtree_t* channel, bool check_status) {
-    for(size_t i = 0; i < 4; i++) ide_read(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
+    for(size_t i = 0; i < 4; i++) ide_read_byte(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
     
     /* wait for BSY flag to clear */
     uint8_t status;
-    while((status = ide_read(channel, IDE_REG_STAT)) & IDE_SR_BSY) task_yield_noirq(); // TODO: is this the right thing to do?
+    while((status = ide_read_byte(channel, IDE_REG_STAT)) & IDE_SR_BSY) task_yield_noirq(); // TODO: is this the right thing to do?
 
     if(check_status) {
         /* check status bits */
@@ -109,6 +109,8 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
         return ret;
     }
 
+    // kdebug("accessing %s: write=%u, offset=%llu, size=%llu -> LBA=%llu-%llu", dev->header.name, (write)?1:0, offset, size, lba_start, lba_end);
+
     /* calculate parameters */
     uint8_t lba_io[6] = {0, 0, 0, 0, 0, 0}, head = 0;
     uint16_t cyl;
@@ -139,26 +141,26 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
     /* wait if drive is busy */
     ide_channel_devtree_t* channel = (ide_channel_devtree_t*) dev->header.parent;
     mutex_acquire(&channel->access); // wait until tasks have finished using this channel
-    while(ide_read(channel, IDE_REG_STAT) & IDE_SR_BSY)
+    while(ide_read_byte(channel, IDE_REG_STAT) & IDE_SR_BSY)
         task_yield_noirq(); // TODO: is this the right thing to do?
 
     /* select drive and addressing mode, and also send head number over */
-    ide_write(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | head | ((dev->drive) ? IDE_HDSR_DRV : 0) | ((dev->addressing == ATA_ADDR_CHS) ? 0 : IDE_HDSR_LBA));
+    ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | head | ((dev->drive) ? IDE_HDSR_DRV : 0) | ((dev->addressing == ATA_ADDR_CHS) ? 0 : IDE_HDSR_LBA));
 
     /* write parameters */
     if(dev->addressing == ATA_ADDR_LBA48) {
-        ide_write(channel, IDE_REG_SECCNT1, (uint8_t) (sec_cnt >> 8));
-        ide_write(channel, IDE_REG_LBA3, lba_io[3]);
-        ide_write(channel, IDE_REG_LBA4, lba_io[4]);
-        ide_write(channel, IDE_REG_LBA5, lba_io[5]);
+        ide_write_byte(channel, IDE_REG_SECCNT1, (uint8_t) (sec_cnt >> 8));
+        ide_write_byte(channel, IDE_REG_LBA3, lba_io[3]);
+        ide_write_byte(channel, IDE_REG_LBA4, lba_io[4]);
+        ide_write_byte(channel, IDE_REG_LBA5, lba_io[5]);
     }
-    ide_write(channel, IDE_REG_SECCNT0, (uint8_t) (sec_cnt & 0xFF));
-    ide_write(channel, IDE_REG_LBA0, lba_io[0]);
-    ide_write(channel, IDE_REG_LBA1, lba_io[1]);
-    ide_write(channel, IDE_REG_LBA2, lba_io[2]);
+    ide_write_byte(channel, IDE_REG_SECCNT0, (uint8_t) (sec_cnt & 0xFF));
+    ide_write_byte(channel, IDE_REG_LBA0, lba_io[0]);
+    ide_write_byte(channel, IDE_REG_LBA1, lba_io[1]);
+    ide_write_byte(channel, IDE_REG_LBA2, lba_io[2]);
 
     /* send command and begin operation */
-    ide_write(channel, IDE_REG_CMD, ata_io_commands[((write) ? (1 << 0) : 0) | ((dev->addressing == ATA_ADDR_LBA48) ? (1 << 1) : 0)]);
+    ide_write_byte(channel, IDE_REG_CMD, ata_io_commands[((write) ? (1 << 0) : 0) | ((dev->addressing == ATA_ADDR_LBA48) ? (1 << 1) : 0)]);
     int8_t poll_ret; // polling result
     uint64_t ret = 0;
     for(size_t i = 0; i < sec_cnt; i++) {
@@ -172,7 +174,7 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
         /* drive is ready for reading/writing */
         if(write) {
             /* write sector - offset and size is guaranteed to be aligned, so there's nothing much to worry about here */
-            ide_write_buf(channel, IDE_REG_DATA, (uint16_t*) buf, 256);
+            ide_write_word_n(channel, IDE_REG_DATA, (uint16_t*) buf, 256);
             buf = &buf[512]; // might be out of bound!
             ret += 512; // a whole sector written
         } else {
@@ -182,29 +184,33 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
             uintptr_t buf_old = (uintptr_t) buf; // buffer pointer before reading
             if(offset_off) {
                 /* discard first bytes */
-                ide_read_buf(channel, IDE_REG_DATA, NULL, offset_off / 2); out += offset_off / 2; // discard whole words at a time
+                ide_read_word_n(channel, IDE_REG_DATA, NULL, offset_off / 2); out += offset_off / 2; // discard whole words at a time
                 if(offset_off & 1) {
-                    *(buf++) = ide_read(channel, IDE_REG_DATA) >> 8; // discard low byte only for the last word
+                    *(buf++) = ide_read_word(channel, IDE_REG_DATA) >> 8; // discard low byte only for the last word
                     out++;
                 }
+                // kdebug("%u first words discarded (offset_off = %u)", out, offset_off);
             }
 
             uint16_t read = 512 - out * 2; if(read > size) read = size; // number of bytes to be read
-            ide_read_buf(channel, IDE_REG_DATA, (uint16_t*) buf, read / 2); buf = &buf[read & ~1]; out += read / 2; // read words at a time
+            ide_read_word_n(channel, IDE_REG_DATA, (uint16_t*) buf, read / 2); buf = &buf[read & ~1]; out += read / 2; // read words at a time
             if(read & 1) {
-                *(buf++) = ide_read(channel, IDE_REG_DATA) & 0xFF; // keep low byte only for the last word
+                *(buf++) = ide_read_word(channel, IDE_REG_DATA) & 0xFF; // keep low byte only for the last word
                 out++;
             }
+            // kdebug("%u bytes read", read);
             
-            if(out < 256) ide_read_buf(channel, IDE_REG_DATA, NULL, 256 - out); // there are still words left to be read from the buffer
-            ret += (uintptr_t) buf - buf_old;
+            if(out < 256) ide_read_word_n(channel, IDE_REG_DATA, NULL, 256 - out); // there are still words left to be read from the buffer
+
+            size_t iter_ret = (uintptr_t) buf - buf_old;
+            ret += iter_ret; size -= iter_ret; offset += iter_ret;
         }
     }
 
 done:
     if(write) {
         /* flush cache */
-        ide_write(channel, IDE_REG_CMD, (dev->addressing == ATA_ADDR_LBA48) ? ATA_CMD_FLUSH_CACHE_EXT : ATA_CMD_FLUSH_CACHE);
+        ide_write_byte(channel, IDE_REG_CMD, (dev->addressing == ATA_ADDR_LBA48) ? ATA_CMD_FLUSH_CACHE_EXT : ATA_CMD_FLUSH_CACHE);
         ide_poll_channel(channel, false);
     }
     mutex_release(&channel->access);

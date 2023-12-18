@@ -74,9 +74,9 @@
 #define ATA_ID_CMDSETS                  164
 #define ATA_ID_MAX_LBA_EXT              200
 
-static inline void ide_write(ide_channel_devtree_t* channel, uint16_t reg, uint8_t val) {
+static inline void ide_write_byte(ide_channel_devtree_t* channel, uint16_t reg, uint8_t val) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     if(reg < IDE_REG_SECCNT1)
         outb(channel->io_base + reg, val);
     else if(reg < IDE_REG_CTRL)
@@ -84,12 +84,25 @@ static inline void ide_write(ide_channel_devtree_t* channel, uint16_t reg, uint8
     else if(reg <= IDE_REG_DEVADDR)
         outb(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg, val);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
 }
 
-static inline uint8_t ide_read(ide_channel_devtree_t* channel, uint16_t reg) {
+static inline void ide_write_word(ide_channel_devtree_t* channel, uint16_t reg, uint16_t val) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+    if(reg < IDE_REG_SECCNT1)
+        outw(channel->io_base + reg, val);
+    else if(reg < IDE_REG_CTRL)
+        outw(channel->io_base - (IDE_REG_SECCNT1 - IDE_REG_SECCNT0) + reg, val);
+    else if(reg <= IDE_REG_DEVADDR)
+        outw(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg, val);
+    if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+}
+
+static inline uint8_t ide_read_byte(ide_channel_devtree_t* channel, uint16_t reg) {
+    if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     uint8_t ret = 0;
     if(reg < IDE_REG_SECCNT1)
         ret = inb(channel->io_base + reg);
@@ -98,13 +111,28 @@ static inline uint8_t ide_read(ide_channel_devtree_t* channel, uint16_t reg) {
     else if(reg <= IDE_REG_DEVADDR)
         ret = inb(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     return ret;
 }
 
-static inline void ide_write_buf(ide_channel_devtree_t* channel, uint16_t reg, const uint16_t* buf, size_t word_len) {
+static inline uint16_t ide_read_word(ide_channel_devtree_t* channel, uint16_t reg) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+    uint16_t ret = 0;
+    if(reg < IDE_REG_SECCNT1)
+        ret = inw(channel->io_base + reg);
+    else if(reg < IDE_REG_CTRL)
+        ret = inw(channel->io_base - (IDE_REG_SECCNT1 - IDE_REG_SECCNT0) + reg);
+    else if(reg <= IDE_REG_DEVADDR)
+        ret = inw(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg);
+    if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+    return ret;
+}
+
+static inline void ide_write_word_n(ide_channel_devtree_t* channel, uint16_t reg, const uint16_t* buf, size_t word_len) {
+    if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     if(reg < IDE_REG_SECCNT1)
         reg = channel->io_base + reg;
     else if(reg < IDE_REG_CTRL)
@@ -113,12 +141,12 @@ static inline void ide_write_buf(ide_channel_devtree_t* channel, uint16_t reg, c
         reg = channel->ctrl_base - (IDE_REG_CTRL - 2) + reg;
     for(size_t i = 0; i < word_len; i++) outw(reg, buf[i]); // TODO: using outsw might be better
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
 }
 
-static inline uint16_t* ide_read_buf(ide_channel_devtree_t* channel, uint16_t reg, uint16_t* buf, size_t word_len) {
+static inline uint16_t* ide_read_word_n(ide_channel_devtree_t* channel, uint16_t reg, uint16_t* buf, size_t word_len) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     if(reg < IDE_REG_SECCNT1)
         reg = channel->io_base + reg;
     else if(reg < IDE_REG_CTRL)
@@ -130,13 +158,13 @@ static inline uint16_t* ide_read_buf(ide_channel_devtree_t* channel, uint16_t re
     else
         for(size_t i = 0; i < word_len; i++) inw(reg); // read to nowhere (i.e. discard)
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
     return buf;
 }
 
 static inline void ide_set_nien(ide_channel_devtree_t* channel, uint8_t nien) {
     channel->irq_disable = nien;
-    ide_write(channel, IDE_REG_CTRL, ((nien) ? IDE_CR_NIEN : 0));
+    ide_write_byte(channel, IDE_REG_CTRL, ((nien) ? IDE_CR_NIEN : 0));
 }
 
 #endif
