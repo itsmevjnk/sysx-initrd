@@ -82,35 +82,38 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
 
         /* store device information */
         ide_dev_devtree_t* dev = kcalloc(1, sizeof(ide_dev_devtree_t));
-        dev->header.size = sizeof(ide_dev_devtree_t);
         if(dev == NULL) {
             kerror("cannot allocate memory for IDE device");
             return false;
         }
+        dev->header.size = sizeof(ide_dev_devtree_t);
         dev->type = (atapi) ? 1 : 0;
         dev->drive = dr;
         dev->signature = *((uint16_t*) &buf[ATA_ID_DEVTYPE]);
         dev->capabilities = *((uint32_t*) &buf[ATA_ID_CAPABILITIES]); // NOTE: OSDev tutorials say this is 16-bit, but ACS-3 specs say it's 32-bit
         dev->cmdsets = *((uint64_t*) &buf[ATA_ID_CMDSETS]) & 0xFFFFFFFFFFFF; // NOTE: OSDev tutorials say this is 32-bit, but ACS-3 specs say it's 48-bit (for supported only)
-        if(dev->capabilities & (1 << 9)) {
-            /* LBA28/48 */
-            if(dev->cmdsets & (1 << 26)) {
-                kdebug("%s drive %u supports LBA48", channel->header.name, dr);
-                dev->size = *((uint64_t*) &buf[ATA_ID_MAX_LBA_EXT]); // LBA48 command set supported
-                dev->addressing = ATA_ADDR_LBA48;
+        if(!atapi) {
+            /* addressing mode is only applicable to ATA drives */
+            if(dev->capabilities & (1 << 9)) {
+                /* LBA28/48 */
+                if(dev->cmdsets & (1 << 26)) {
+                    kdebug("%s drive %u supports LBA48", channel->header.name, dr);
+                    dev->size = *((uint64_t*) &buf[ATA_ID_MAX_LBA_EXT]); // LBA48 command set supported
+                    dev->addressing = ATA_ADDR_LBA48;
+                } else {
+                    kdebug("%s drive %u supports LBA28", channel->header.name, dr);
+                    dev->size = *((uint32_t*) &buf[ATA_ID_MAX_LBA]);
+                    dev->addressing = ATA_ADDR_LBA28;
+                }
             } else {
-                kdebug("%s drive %u supports LBA28", channel->header.name, dr);
-                dev->size = *((uint32_t*) &buf[ATA_ID_MAX_LBA]);
-                dev->addressing = ATA_ADDR_LBA28;
+                /* CHS */
+                kdebug("%s drive %u only supports CHS addressing", channel->header.name, dr);
+                dev->sects = *((uint16_t*) &buf[ATA_ID_SECTS]);
+                dev->cyls = *((uint16_t*) &buf[ATA_ID_CYLS]);
+                dev->heads = *((uint16_t*) &buf[ATA_ID_HEADS]);
+                dev->size = dev->sects * dev->cyls * dev->heads;
+                dev->addressing = ATA_ADDR_CHS;
             }
-        } else {
-            /* CHS */
-            kdebug("%s drive %u only supports CHS addressing", channel->header.name, dr);
-            dev->sects = *((uint16_t*) &buf[ATA_ID_SECTS]);
-            dev->cyls = *((uint16_t*) &buf[ATA_ID_CYLS]);
-            dev->heads = *((uint16_t*) &buf[ATA_ID_HEADS]);
-            dev->size = dev->sects * dev->cyls * dev->heads;
-            dev->addressing = ATA_ADDR_CHS;
         }
         for(size_t i = 0; i < 40; i += 2) {
             dev->model[i] = buf[ATA_ID_MODEL + i + 1];

@@ -146,6 +146,7 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
 
     /* select drive and addressing mode, and also send head number over */
     ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | head | ((dev->drive) ? IDE_HDSR_DRV : 0) | ((dev->addressing == ATA_ADDR_CHS) ? 0 : IDE_HDSR_LBA));
+    for(size_t i = 0; i < 4; i++) ide_read_byte(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
 
     /* write parameters */
     if(dev->addressing == ATA_ADDR_LBA48) {
