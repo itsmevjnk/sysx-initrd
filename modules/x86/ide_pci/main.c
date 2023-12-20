@@ -5,16 +5,21 @@
 #include <stdlib.h>
 #include <hal/timer.h>
 #include <helpers/basecol.h>
-
+#include <arch/x86/i8259.h>
 #include "devtree_defs.h"
 #include "regs.h"
 #include "devfs.h"
+#include "irq.h"
 
 /* fallback IO and control bases */
 #define IDE_PRI_IO_BASE                 0x1F0
 #define IDE_PRI_CTRL_BASE               0x3F6
 #define IDE_SEC_IO_BASE                 0x170
 #define IDE_SEC_CTRL_BASE               0x376
+
+/* fallback interrupt lines */
+#define IDE_PRI_IRQ_LINE                14
+#define IDE_SEC_IRQ_LINE                15
 
 static bool ide_scan_devices(ide_channel_devtree_t* channel) {
     uint8_t buf[256 * 2]; // buffer for identify command
@@ -27,13 +32,15 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
     }
 
     for(size_t dr = 0; dr < 2; dr++) {
-        /* select drive */
+        /* select drive and disable interrupt */
         ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | ((dr) ? IDE_HDSR_DRV : 0));
-        timer_delay_ms(1); // give it some time to change
+        ide_delay(channel); // wait for drive to switch
+        channel->selected_drv = dr;
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_NIEN);
 
         /* send ATA identify command */
         ide_write_byte(channel, IDE_REG_CMD, ATA_CMD_ID);
-        timer_delay_ms(1);
+        ide_delay(channel);
         if(ide_read_byte(channel, IDE_REG_STAT) == 0) {
             kdebug("no drives on %s drive %u (SR = 0)", channel->header.name, dr);
             continue; // next drive
@@ -55,7 +62,7 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
             if((cl == 0x14 && ch == 0xEB) || (cl == 0x69 && ch == 0x96)) {
                 /* ATAPI device here */
                 ide_write_byte(channel, IDE_REG_CMD, ATA_CMD_ID_PACKET);
-                timer_delay_ms(1);
+                ide_delay(channel);
                 while(1) { // TODO: is this needed?
                     uint8_t status = ide_read_byte(channel, IDE_REG_STAT);
                     if(status & IDE_SR_ERR) {
@@ -87,8 +94,9 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
             return false;
         }
         dev->header.size = sizeof(ide_dev_devtree_t);
-        dev->type = (atapi) ? 1 : 0;
         dev->drive = dr;
+        devtree_add_child((devtree_t*) channel, (devtree_t*) dev); // we'll be back to set the name and other things later
+        dev->type = (atapi) ? 1 : 0;
         dev->signature = *((uint16_t*) &buf[ATA_ID_DEVTYPE]);
         dev->capabilities = *((uint32_t*) &buf[ATA_ID_CAPABILITIES]); // NOTE: OSDev tutorials say this is 16-bit, but ACS-3 specs say it's 32-bit
         dev->cmdsets = *((uint64_t*) &buf[ATA_ID_CMDSETS]) & 0xFFFFFFFFFFFF; // NOTE: OSDev tutorials say this is 32-bit, but ACS-3 specs say it's 48-bit (for supported only)
@@ -152,23 +160,69 @@ static bool ide_scan_devices(ide_channel_devtree_t* channel) {
         dev->devfs_node->link.ptr = dev; // link back to device
 
         kdebug("    - %s (devfs name: %s): %s, type %u, sig 0x%04x, capabilities 0x%x, cmd sets 0x%llx, addr. mode %u, size: %llu sectors", dev->header.name, dev->devfs_node->name, dev->model, dev->type, dev->signature, dev->capabilities, dev->cmdsets, dev->addressing, dev->size);
-        devtree_add_child((devtree_t*) channel, (devtree_t*) dev);
-
-        /* test ATA device */
-        if(!atapi) {
-            memset(buf, 0, 512);
-            vfs_open(dev->devfs_node, true, false);
-            kdebug("sector 0 of %s (%llu bytes):", dev->devfs_node->name, vfs_read(dev->devfs_node, 0, 512, buf));
-            for(size_t i = 0; i < 32; i++) kdebug("%03x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", i * 16, buf[i * 16 + 0], buf[i * 16 + 1], buf[i * 16 + 2], buf[i * 16 + 3], buf[i * 16 + 4], buf[i * 16 + 5], buf[i * 16 + 6], buf[i * 16 + 7], buf[i * 16 + 8], buf[i * 16 + 9], buf[i * 16 + 10], buf[i * 16 + 11], buf[i * 16 + 12], buf[i * 16 + 13], buf[i * 16 + 14], buf[i * 16 + 15]);
-            vfs_close(dev->devfs_node);
-        }
     }
 
     return true;
 }
 
-static bool ide_init(pci_devtree_t* dev, uint8_t prog_if) {
-    kinfo("initializing IDE on device %s, prog IF 0x%02x", dev->header.name, prog_if);
+static bool ide_init(pci_devtree_t* dev) {
+    /* check and set up Prog IF */
+    uint8_t prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
+    uint8_t prog_if_orig = prog_if;
+    bool no_irq = false; // set if IRQ is to be left disabled
+    kdebug("initializing IDE on device %s, original Prog IF: 0x%02x", dev->header.name, prog_if_orig);
+    /* TODO: PCI native mode interrupts */
+    // if((prog_if & (1 << 1)) && !(prog_if & (1 << 0))) {
+    //     kdebug(" - setting primary channel to PCI native mode");
+    //     prog_if |= (1 << 0);
+    // }
+    // if((prog_if & (1 << 3)) && !(prog_if & (1 << 2))) {
+    //     kdebug(" - setting secondary channel to PCI native mode");
+    //     prog_if |= (1 << 2);
+    // }
+    if((prog_if & (1 << 1)) && (prog_if & (1 << 0))) {
+        kdebug(" - setting primary channel to ISA compatibility mode");
+        prog_if &= ~(1 << 0);
+    }
+    if((prog_if & (1 << 3)) && !(prog_if & (1 << 2))) {
+        kdebug(" - setting secondary channel to ISA compatibility mode");
+        prog_if &= ~(1 << 2);
+    }
+    if(prog_if != prog_if_orig) {
+        kdebug(" - writing new prog IF value 0x%02x", prog_if);
+        pci_write_progif(dev->bus, dev->dev, dev->func, prog_if);
+        prog_if_orig = prog_if; prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
+        if(prog_if != prog_if_orig) {
+            kdebug("    - setting Prog IF value failed: readback results in 0x%02x (expected 0x%02x)", prog_if, prog_if_orig);
+            no_irq = true; // we can't live with PCI interrupts just yet
+        }
+    }
+    // uint8_t pci_irq_line = 15; // only applicable if PCI native mode is enabled on one of the channels
+    // if(prog_if & ((1 << 0) | (1 << 2))) {
+    //     /* get IRQ line */
+    //     bool disable_pci = false; // set if PCI native mode is to be disabled
+    //     acpi_resource_t rsrc;
+    //     if(lai_pci_route(&rsrc, 0, dev->bus, dev->dev, dev->func)) {
+    //         kerror("cannot route PCI interrupt for device %s", dev->header.name);
+    //         disable_pci = true;
+    //     } else {
+    //         kdebug(" - PCI interrupt routing: base = %u, irq_flags = 0x%x", rsrc.base, rsrc.irq_flags);
+    //         pci_irq_line = rsrc.base;
+    //     }
+
+    //     if(disable_pci) {
+    //         kerror(" - disabling PCI native mode for device %s (if possible)", dev->header.name);
+    //         if(prog_if & (1 << 1)) prog_if &= ~(1 << 0);
+    //         if(prog_if & (1 << 3)) prog_if &= ~(1 << 2);
+    //         kdebug(" - writing new prog IF value 0x%02x", prog_if);
+    //         pci_write_progif(dev->bus, dev->dev, dev->func, prog_if);
+    //         prog_if_orig = prog_if; prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
+    //         if(prog_if != prog_if_orig) {
+    //             kerror("    - cannot disable PCI native mode (Prog IF readback got 0x%02x, expected 0x%02x) - disabling interrupts", prog_if, prog_if_orig);
+    //             no_irq = true;
+    //         }
+    //     }
+    // }
 
     /* enumerate channels */
     ide_channel_devtree_t* channels = kcalloc(2, sizeof(ide_channel_devtree_t));
@@ -203,12 +257,64 @@ static bool ide_init(pci_devtree_t* dev, uint8_t prog_if) {
         kdebug(" - %s: IO base 0x%x, control port 0x%x, bus master IDE base 0x%x", channels[ch].header.name, channels[ch].io_base, channels[ch].ctrl_base, channels[ch].bmide_base);
         devtree_add_child((devtree_t*) dev, (devtree_t*) &channels[ch]);
 
-        ide_set_nien(&channels[ch], 1); // disable interrupts for now
-
         /* enumerate devices on each channel */
         if(!ide_scan_devices(&channels[ch])) {
             kerror("fatal error occurred during device %s channel %u initialization", dev->header.name, ch);
             return false;
+        }
+    }
+
+    if(!no_irq) {
+        /* set up interrupts */
+        // if(prog_if & ((1 << 0) | (1 << 2))) {
+        //     /* set up PCI native mode interrupt */
+        //     kdebug(" - PCI native mode interrupt line: %u", pci_irq_line);
+        //     ide_irq_channels[pci_irq_line] = &channels[0]; // it doesn't really matter which channel we set here as long as it's from the same device
+        //     pic_handle(pci_irq_line, &ide_pci_irq_handler);
+        //     pic_unmask(pci_irq_line);
+        // }
+
+        if(!(prog_if & (1 << 0))) {
+            /* set up ISA compatibility mode interrupt for primary channel */
+            kdebug(" - primary channel compatibility mode interrupt line: %u", IDE_PRI_IRQ_LINE);
+            ide_irq_channels[IDE_PRI_IRQ_LINE] = &channels[0];
+            pic_handle(IDE_PRI_IRQ_LINE, &ide_compat_irq_handler);
+            pic_unmask(IDE_PRI_IRQ_LINE);
+        }
+
+        if(!(prog_if & (1 << 2))) {
+            /* set up ISA compatibility mode interrupt for secondary channel */
+            kdebug(" - secondary channel compatibility mode interrupt line: %u", IDE_SEC_IRQ_LINE);
+            ide_irq_channels[IDE_SEC_IRQ_LINE] = &channels[1];
+            pic_handle(IDE_SEC_IRQ_LINE, &ide_compat_irq_handler);
+            pic_unmask(IDE_SEC_IRQ_LINE);
+        }
+
+        /* enable interrupts for all of the available drives */
+        for(size_t ch = 0; ch < 2; ch++) {
+            ide_dev_devtree_t* drive = (ide_dev_devtree_t*) channels[ch].header.first_child;
+            while(drive != NULL) {
+                ide_set_nien(drive, 0);
+                drive = (ide_dev_devtree_t*) drive->header.next_sibling;
+            }
+        }
+    }
+
+    /* test all drives */
+    kdebug(" - testing drives");
+    for(size_t ch = 0; ch < 2; ch++) {
+        ide_dev_devtree_t* drive = (ide_dev_devtree_t*) channels[ch].header.first_child;
+        while(drive != NULL) {
+            if(!drive->type) {
+                /* ATA */
+                uint8_t buf[512];
+                memset(buf, 0, 512);
+                vfs_open(drive->devfs_node, true, false);
+                kdebug("    - sector 0 of %s (%llu bytes):", drive->devfs_node->name, vfs_read(drive->devfs_node, 0, 512, buf));
+                for(size_t i = 0; i < 32; i++) kdebug("      %03x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", i * 16, buf[i * 16 + 0], buf[i * 16 + 1], buf[i * 16 + 2], buf[i * 16 + 3], buf[i * 16 + 4], buf[i * 16 + 5], buf[i * 16 + 6], buf[i * 16 + 7], buf[i * 16 + 8], buf[i * 16 + 9], buf[i * 16 + 10], buf[i * 16 + 11], buf[i * 16 + 12], buf[i * 16 + 13], buf[i * 16 + 14], buf[i * 16 + 15]);
+                vfs_close(drive->devfs_node);
+            }
+            drive = (ide_dev_devtree_t*) drive->header.next_sibling;
         }
     }
 
@@ -232,22 +338,7 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
                 if(mutex_test(&pci_dev->header.in_use)) kerror("device %s is being held by another driver, skipping", pci_dev->header.name);
                 else {
                     mutex_acquire(&pci_dev->header.in_use);
-                    uint8_t prog_if = pci_read_progif(pci_dev->bus, pci_dev->dev, pci_dev->func);
-                    uint8_t prog_if_orig = prog_if;
-                    kdebug("found device %s, prog IF 0x%x", pci_dev->header.name, prog_if);
-                    if((prog_if & (1 << 1)) && !(prog_if & (1 << 0))) {
-                        kdebug(" - setting primary channel to PCI native mode");
-                        prog_if |= (1 << 0);
-                    }
-                    if((prog_if & (1 << 3)) && !(prog_if & (1 << 2))) {
-                        kdebug(" - setting secondary channel to PCI native mode");
-                        prog_if |= (1 << 2);
-                    }
-                    if(prog_if != prog_if_orig) {
-                        kdebug(" - writing new prog IF value");
-                        pci_write_progif(pci_dev->bus, pci_dev->dev, pci_dev->func, prog_if);
-                    }
-                    if(!ide_init(pci_dev, prog_if)) {
+                    if(!ide_init(pci_dev)) {
                         kerror("fatal error occurred during device %s initialization", pci_dev->header.name);
                         return -1;
                     }
@@ -262,6 +353,8 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
         return -2;
     }
     kinfo("%u IDE controller(s) detected on PCI bus", detected);
+
+    // while(1);
 
     return 0;
 }

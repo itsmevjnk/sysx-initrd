@@ -8,7 +8,7 @@
 #define ATA_IO_MAX_SECTORS                          256 // maximum number of sectors to access in one go (so that all tasks have a fairer chance of accessing the channel/drive)
 
 static int8_t ide_poll_channel(ide_channel_devtree_t* channel, bool check_status) {
-    for(size_t i = 0; i < 4; i++) ide_read_byte(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
+    ide_delay(channel);
     
     /* wait for BSY flag to clear */
     uint8_t status;
@@ -146,7 +146,10 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
 
     /* select drive and addressing mode, and also send head number over */
     ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | head | ((dev->drive) ? IDE_HDSR_DRV : 0) | ((dev->addressing == ATA_ADDR_CHS) ? 0 : IDE_HDSR_LBA));
-    for(size_t i = 0; i < 4; i++) ide_read_byte(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
+    if(channel->selected_drv != dev->drive) {
+        channel->selected_drv = dev->drive;
+        ide_delay(channel);
+    }
 
     /* write parameters */
     if(dev->addressing == ATA_ADDR_LBA48) {
@@ -161,7 +164,16 @@ static uint64_t ide_devfs_ata_stub(ide_dev_devtree_t* dev, bool write, uint64_t 
     ide_write_byte(channel, IDE_REG_LBA2, lba_io[2]);
 
     /* send command and begin operation */
+    ide_set_nien(dev, dev->irq_disable);
+    if(!dev->irq_disable) {
+        if(!mutex_test(&channel->irq_block)) mutex_acquire(&channel->irq_block); // prepare for waiting
+    }
     ide_write_byte(channel, IDE_REG_CMD, ata_io_commands[((write) ? (1 << 0) : 0) | ((dev->addressing == ATA_ADDR_LBA48) ? (1 << 1) : 0)]);
+    if(!dev->irq_disable) {
+        mutex_acquire(&channel->irq_block); // re-acquire IRQ (so we know when to continue)
+    }
+
+    /* poll drive after receiving interrupt */
     int8_t poll_ret; // polling result
     uint64_t ret = 0;
     for(size_t i = 0; i < sec_cnt; i++) {

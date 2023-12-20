@@ -76,7 +76,7 @@
 
 static inline void ide_write_byte(ide_channel_devtree_t* channel, uint16_t reg, uint8_t val) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     if(reg < IDE_REG_SECCNT1)
         outb(channel->io_base + reg, val);
     else if(reg < IDE_REG_CTRL)
@@ -84,12 +84,12 @@ static inline void ide_write_byte(ide_channel_devtree_t* channel, uint16_t reg, 
     else if(reg <= IDE_REG_DEVADDR)
         outb(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg, val);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
 }
 
 static inline void ide_write_word(ide_channel_devtree_t* channel, uint16_t reg, uint16_t val) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     if(reg < IDE_REG_SECCNT1)
         outw(channel->io_base + reg, val);
     else if(reg < IDE_REG_CTRL)
@@ -97,12 +97,12 @@ static inline void ide_write_word(ide_channel_devtree_t* channel, uint16_t reg, 
     else if(reg <= IDE_REG_DEVADDR)
         outw(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg, val);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
 }
 
 static inline uint8_t ide_read_byte(ide_channel_devtree_t* channel, uint16_t reg) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     uint8_t ret = 0;
     if(reg < IDE_REG_SECCNT1)
         ret = inb(channel->io_base + reg);
@@ -111,13 +111,13 @@ static inline uint8_t ide_read_byte(ide_channel_devtree_t* channel, uint16_t reg
     else if(reg <= IDE_REG_DEVADDR)
         ret = inb(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
     return ret;
 }
 
 static inline uint16_t ide_read_word(ide_channel_devtree_t* channel, uint16_t reg) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     uint16_t ret = 0;
     if(reg < IDE_REG_SECCNT1)
         ret = inw(channel->io_base + reg);
@@ -126,13 +126,13 @@ static inline uint16_t ide_read_word(ide_channel_devtree_t* channel, uint16_t re
     else if(reg <= IDE_REG_DEVADDR)
         ret = inw(channel->ctrl_base - (IDE_REG_CTRL - 2) + reg);
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
     return ret;
 }
 
 static inline void ide_write_word_n(ide_channel_devtree_t* channel, uint16_t reg, const uint16_t* buf, size_t word_len) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     if(reg < IDE_REG_SECCNT1)
         reg = channel->io_base + reg;
     else if(reg < IDE_REG_CTRL)
@@ -141,12 +141,12 @@ static inline void ide_write_word_n(ide_channel_devtree_t* channel, uint16_t reg
         reg = channel->ctrl_base - (IDE_REG_CTRL - 2) + reg;
     for(size_t i = 0; i < word_len; i++) outw(reg, buf[i]); // TODO: using outsw might be better
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
 }
 
 static inline uint16_t* ide_read_word_n(ide_channel_devtree_t* channel, uint16_t reg, uint16_t* buf, size_t word_len) {
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5) // access overlapped regs
-        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB | ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, IDE_CR_HOB);
     if(reg < IDE_REG_SECCNT1)
         reg = channel->io_base + reg;
     else if(reg < IDE_REG_CTRL)
@@ -158,13 +158,26 @@ static inline uint16_t* ide_read_word_n(ide_channel_devtree_t* channel, uint16_t
     else
         for(size_t i = 0; i < word_len; i++) inw(reg); // read to nowhere (i.e. discard)
     if(reg >= IDE_REG_SECCNT1 && reg <= IDE_REG_LBA5)
-        ide_write_byte(channel, IDE_REG_CTRL, ((channel->irq_disable) ? IDE_CR_NIEN : 0));
+        ide_write_byte(channel, IDE_REG_CTRL, 0);
     return buf;
 }
 
-static inline void ide_set_nien(ide_channel_devtree_t* channel, uint8_t nien) {
-    channel->irq_disable = nien;
-    ide_write_byte(channel, IDE_REG_CTRL, ((nien) ? IDE_CR_NIEN : 0));
+static inline void ide_delay(ide_channel_devtree_t* channel) {
+    for(size_t i = 0; i < 4; i++) ide_read_byte(channel, IDE_REG_ALTSTAT); // 400ns delay (TODO: improve this)
+}
+
+static inline void ide_set_drive(ide_dev_devtree_t* dev) {
+    ide_channel_devtree_t* channel = (ide_channel_devtree_t*) dev->header.parent;
+    if(channel->selected_drv == dev->drive) return; // nothing to do here
+    ide_write_byte(channel, IDE_REG_HDDEVSEL, IDE_HDSR_BASE | ((dev->drive) ? IDE_HDSR_DRV : 0));
+    channel->selected_drv = dev->drive;
+    ide_delay(channel); // wait for drive to switch
+}
+
+static inline void ide_set_nien(ide_dev_devtree_t* dev, uint8_t nien) {
+    dev->irq_disable = nien;
+    ide_set_drive(dev); // switch to the device to begin setting
+    ide_write_byte((ide_channel_devtree_t*) dev->header.parent, IDE_REG_CTRL, ((nien) ? IDE_CR_NIEN : 0));
 }
 
 #endif

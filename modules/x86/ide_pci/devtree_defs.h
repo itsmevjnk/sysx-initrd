@@ -24,6 +24,7 @@ typedef struct {
     uint16_t cyls; // tracks per platter - applicable for ATA in CHS only
     uint16_t heads; // heads/platters - applicable for ATA in CHS only
     uint64_t size; // in sectors
+    uint8_t irq_disable; // nIEN
     char model[41]; // drive model string
     vfs_node_t* devfs_node; // devfs node
 } ide_dev_devtree_t;
@@ -34,7 +35,8 @@ typedef struct {
     uint16_t io_base; // IO
     uint16_t ctrl_base; // control
     uint16_t bmide_base; // bus master IDE
-    uint8_t irq_disable; // nIEN
+    uint8_t selected_drv; // last selected drive
+    mutex_t irq_block; // this mutex is acquired by the I/O function before waiting for interrupts, then released by the IRQ handler while the function re-acquires the mutex
     mutex_t access; // mutex for blocking channel access
 } ide_channel_devtree_t;
 

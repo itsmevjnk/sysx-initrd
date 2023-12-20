@@ -5,7 +5,8 @@ OUTPUT_FILE=ide_pci.ko # output file name
 # component objects
 OBJS=\
 main.o \
-devfs.o
+devfs.o \
+irq.o
 
 .PHONY: all clean install
 .SUFFIXES: .o .c .s .asm
