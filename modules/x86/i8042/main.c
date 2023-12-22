@@ -327,7 +327,7 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
 
     kdebug("setting up interrupts");
     ps2_write_ccb(ps2_read_ccb() | ((ps2_ports[0].ok) ? PS2_CCB_P1_IRQ : 0) | ((ps2_ports[1].ok) ? PS2_CCB_P2_IRQ : 0));
-    if(&apic_enabled != NULL && apic_enabled) {
+    if(apic_enabled) {
         /* use APIC */
         ioapic_handle(ioapic_irq_gsi[PS2_P1_IRQNUM], &ps2_irq_handler); ioapic_unmask(ioapic_irq_gsi[PS2_P1_IRQNUM]);
         ioapic_handle(ioapic_irq_gsi[PS2_P2_IRQNUM], &ps2_irq_handler); ioapic_unmask(ioapic_irq_gsi[PS2_P2_IRQNUM]);

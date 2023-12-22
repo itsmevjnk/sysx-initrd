@@ -278,7 +278,7 @@ static bool ide_init(pci_devtree_t* dev) {
         if(!(prog_if & (1 << 0))) {
             /* set up ISA compatibility mode interrupt for primary channel */
             kdebug(" - primary channel compatibility mode interrupt line: %u", IDE_PRI_IRQ_LINE);
-            if(&apic_enabled != NULL && apic_enabled) {
+            if(apic_enabled) {
                 /* use APIC */
                 ioapic_handle(ioapic_irq_gsi[IDE_PRI_IRQ_LINE], &ide_compat_irq_handler);
                 ioapic_unmask(ioapic_irq_gsi[IDE_PRI_IRQ_LINE]);
@@ -294,7 +294,7 @@ static bool ide_init(pci_devtree_t* dev) {
         if(!(prog_if & (1 << 2))) {
             /* set up ISA compatibility mode interrupt for secondary channel */
             kdebug(" - secondary channel compatibility mode interrupt line: %u", IDE_SEC_IRQ_LINE);
-            if(&apic_enabled != NULL && apic_enabled) {
+            if(apic_enabled) {
                 /* use APIC */
                 ioapic_handle(ioapic_irq_gsi[IDE_SEC_IRQ_LINE], &ide_compat_irq_handler);
                 ioapic_unmask(ioapic_irq_gsi[IDE_SEC_IRQ_LINE]);
