@@ -178,7 +178,7 @@ shrink:
         kfree(vbe_modes);
         vmm_pgunmap(vmm_current, VBE_DATA_VADDR, 0);
         return -5;
-    } else kdebug("allocated framebuffer at 0x%x, size: %u bytes", vbe_framebuffer, fb_size);
+    } else kdebug("mapped framebuffer at paddr 0x%x to 0x%x, size: %u bytes", vbe_mode_current->framebuffer_ptr, vbe_framebuffer, fb_size);
 
     /* allocate memory for backbuffer */
     vbe_fbuf_impl.flip = NULL;
