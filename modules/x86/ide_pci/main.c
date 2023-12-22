@@ -6,6 +6,7 @@
 #include <hal/timer.h>
 #include <helpers/basecol.h>
 #include <arch/x86/i8259.h>
+#include <arch/x86cpu/apic.h>
 #include "devtree_defs.h"
 #include "regs.h"
 #include "devfs.h"
@@ -277,17 +278,33 @@ static bool ide_init(pci_devtree_t* dev) {
         if(!(prog_if & (1 << 0))) {
             /* set up ISA compatibility mode interrupt for primary channel */
             kdebug(" - primary channel compatibility mode interrupt line: %u", IDE_PRI_IRQ_LINE);
-            ide_irq_channels[IDE_PRI_IRQ_LINE] = &channels[0];
-            pic_handle(IDE_PRI_IRQ_LINE, &ide_compat_irq_handler);
-            pic_unmask(IDE_PRI_IRQ_LINE);
+            if(&apic_enabled != NULL && apic_enabled) {
+                /* use APIC */
+                ioapic_handle(ioapic_irq_gsi[IDE_PRI_IRQ_LINE], &ide_compat_irq_handler);
+                ioapic_unmask(ioapic_irq_gsi[IDE_PRI_IRQ_LINE]);
+                ide_irq_channels[ioapic_irq_gsi[IDE_PRI_IRQ_LINE]] = &channels[0];
+            } else {
+                /* use legacy PIC */
+                pic_handle(IDE_PRI_IRQ_LINE, &ide_compat_irq_handler);
+                pic_unmask(IDE_PRI_IRQ_LINE);
+                ide_irq_channels[IDE_PRI_IRQ_LINE] = &channels[0];
+            }
         }
 
         if(!(prog_if & (1 << 2))) {
             /* set up ISA compatibility mode interrupt for secondary channel */
             kdebug(" - secondary channel compatibility mode interrupt line: %u", IDE_SEC_IRQ_LINE);
-            ide_irq_channels[IDE_SEC_IRQ_LINE] = &channels[1];
-            pic_handle(IDE_SEC_IRQ_LINE, &ide_compat_irq_handler);
-            pic_unmask(IDE_SEC_IRQ_LINE);
+            if(&apic_enabled != NULL && apic_enabled) {
+                /* use APIC */
+                ioapic_handle(ioapic_irq_gsi[IDE_SEC_IRQ_LINE], &ide_compat_irq_handler);
+                ioapic_unmask(ioapic_irq_gsi[IDE_SEC_IRQ_LINE]);
+                ide_irq_channels[ioapic_irq_gsi[IDE_SEC_IRQ_LINE]] = &channels[1];
+            } else {
+                /* use legacy PIC */
+                pic_handle(IDE_SEC_IRQ_LINE, &ide_compat_irq_handler);
+                pic_unmask(IDE_SEC_IRQ_LINE);
+                ide_irq_channels[IDE_SEC_IRQ_LINE] = &channels[1];
+            }
         }
 
         /* enable interrupts for all of the available drives */

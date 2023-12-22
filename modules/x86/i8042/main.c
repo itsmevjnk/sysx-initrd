@@ -6,6 +6,7 @@
 #include <kernel/log.h>
 #include <hal/keyboard.h>
 #include <arch/x86/i8259.h>
+#include <arch/x86cpu/apic.h>
 #include <hal/timer.h>
 #include <kernel/cmdline.h>
 
@@ -17,6 +18,7 @@
 /* IRQ line numbers for PS/2 ports */
 #define PS2_P1_IRQNUM           1
 #define PS2_P2_IRQNUM           12
+static uint8_t ps2_p2_irq = PS2_P2_IRQNUM; // IRQ or GSI for second port
 
 #define PS2_DATA_TIMEOUT        100000UL // response timeout in microseconds
 #define PS2_RESET_TIMEOUT       1000000UL // device reset response timeout in microseconds
@@ -75,7 +77,7 @@ static void ps2_kbd_handler(uint8_t port, uint8_t data) {
 
 static void ps2_irq_handler(uint8_t irq, void* context) {
     (void) context;
-    uint8_t port = (irq == PS2_P2_IRQNUM) ? 1 : 0;
+    uint8_t port = (irq == ps2_p2_irq) ? 1 : 0;
     uint8_t data = inb(PS2_IO_DATA); // read data from controller
     // kdebug("PS/2 keyboard driver handling IRQ %u (port %u), data: 0x%02x", irq, port, data);
 
@@ -325,8 +327,16 @@ int32_t kmod_init(elf_prgload_t* load_result, size_t load_result_len) {
 
     kdebug("setting up interrupts");
     ps2_write_ccb(ps2_read_ccb() | ((ps2_ports[0].ok) ? PS2_CCB_P1_IRQ : 0) | ((ps2_ports[1].ok) ? PS2_CCB_P2_IRQ : 0));
-    pic_handle(PS2_P1_IRQNUM, &ps2_irq_handler); pic_handle(PS2_P2_IRQNUM, &ps2_irq_handler);
-    pic_unmask_bm(((ps2_ports[0].ok) ? (1 << PS2_P1_IRQNUM) : 0) | ((ps2_ports[1].ok) ? (1 << PS2_P2_IRQNUM) : 0));
+    if(&apic_enabled != NULL && apic_enabled) {
+        /* use APIC */
+        ioapic_handle(ioapic_irq_gsi[PS2_P1_IRQNUM], &ps2_irq_handler); ioapic_unmask(ioapic_irq_gsi[PS2_P1_IRQNUM]);
+        ioapic_handle(ioapic_irq_gsi[PS2_P2_IRQNUM], &ps2_irq_handler); ioapic_unmask(ioapic_irq_gsi[PS2_P2_IRQNUM]);
+        ps2_p2_irq = ioapic_irq_gsi[PS2_P2_IRQNUM];
+    } else {
+        /* use legacy PIC */
+        pic_handle(PS2_P1_IRQNUM, &ps2_irq_handler); pic_handle(PS2_P2_IRQNUM, &ps2_irq_handler);
+        pic_unmask_bm(((ps2_ports[0].ok) ? (1 << PS2_P1_IRQNUM) : 0) | ((ps2_ports[1].ok) ? (1 << PS2_P2_IRQNUM) : 0));
+    }
 
     for(uint8_t i = 0; i < 2; i++) {
         if(ps2_ports[i].ok) {

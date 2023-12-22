@@ -12,10 +12,10 @@ main.o
 all: $(OUTPUT_FILE)
 
 $(OUTPUT_FILE): $(OBJS)
-	$(LD) -r $(OBJS) -o $@
+	$(CC) -r -o $@ $(OBJS) $(LDFLAGS)
 
 .c.o:
-	$(CC) -c $< -o $@ $(CFLAGS) -isystem $(WORKDIR)/initrd/modules/include -isystem $(WORKDIR)/kernel -isystem $(WORKDIR)/kernel/lib
+	$(CC) -c $< -o $@ $(CFLAGS) -isystem $(WORKDIR)/initrd/modules/include -isystem $(WORKDIR)/kernel -isystem $(WORKDIR)/kernel/lib -isystem $(WORKDIR)/kernel/drivers/lai/include
 
 .s.o:
 	$(AS) -c $< -o $@ $(ASFLAGS)

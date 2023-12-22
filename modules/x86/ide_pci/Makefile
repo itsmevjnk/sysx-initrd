@@ -14,10 +14,10 @@ irq.o
 all: $(OUTPUT_FILE)
 
 $(OUTPUT_FILE): $(OBJS)
-	$(CC) -r $(OBJS) -o $@ -nostdlib -lgcc 
+	$(CC) -r -o $@ $(OBJS) $(LDFLAGS)
 
 .c.o:
-	$(CC) -c $< -o $@ $(CFLAGS) -isystem $(WORKDIR)/initrd/modules/include -isystem $(WORKDIR)/kernel -isystem $(WORKDIR)/kernel/lib
+	$(CC) -c $< -o $@ $(CFLAGS) -isystem $(WORKDIR)/initrd/modules/include -isystem $(WORKDIR)/kernel -isystem $(WORKDIR)/kernel/lib -isystem $(WORKDIR)/kernel/drivers/lai/include
 
 .s.o:
 	$(AS) -c $< -o $@ $(ASFLAGS)

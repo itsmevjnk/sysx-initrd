@@ -2,7 +2,7 @@
 #include "regs.h"
 #include <drivers/pci.h>
 
-ide_channel_devtree_t* ide_irq_channels[16] = {NULL};
+ide_channel_devtree_t* ide_irq_channels[24] = {NULL};
 
 // void ide_pci_irq_handler(uint8_t irq, void* context) {
 //     (void) context;
