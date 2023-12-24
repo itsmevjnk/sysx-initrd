@@ -5,7 +5,7 @@ msg_child: db "(from another, forked, process)", 0x0A
 len_child equ $ - msg_child
 
 section .bss
-child_done: dd 0
+child_done: resd 1
 
 section .text
 global _start
@@ -19,7 +19,7 @@ int 0x80
 mov eax, 3 ; fork
 int 0x80
 test eax, eax
-jnz .parent
+jnz .exit
 
 .child:
 mov eax, 2 ; write
@@ -28,12 +28,6 @@ mov ecx, len_child
 mov edx, msg_child
 int 0x80
 inc dword [child_done]
-jmp .exit ; forked process also needs to exit too!
-
-.parent: ; wait for child task to finish its job
-mov eax, [child_done]
-test eax, eax
-jz .parent
 
 .exit:
 mov eax, 0 ; exit
