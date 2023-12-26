@@ -172,22 +172,28 @@ static bool ide_init(pci_devtree_t* dev) {
     uint8_t prog_if_orig = prog_if;
     bool no_irq = false; // set if IRQ is to be left disabled
     kdebug("initializing IDE on device %s, original Prog IF: 0x%02x", dev->header.name, prog_if_orig);
-    /* TODO: PCI native mode interrupts */
-    // if((prog_if & (1 << 1)) && !(prog_if & (1 << 0))) {
-    //     kdebug(" - setting primary channel to PCI native mode");
-    //     prog_if |= (1 << 0);
-    // }
-    // if((prog_if & (1 << 3)) && !(prog_if & (1 << 2))) {
-    //     kdebug(" - setting secondary channel to PCI native mode");
-    //     prog_if |= (1 << 2);
-    // }
-    if((prog_if & (1 << 1)) && (prog_if & (1 << 0))) {
-        kdebug(" - setting primary channel to ISA compatibility mode");
-        prog_if &= ~(1 << 0);
-    }
-    if((prog_if & (1 << 3)) && !(prog_if & (1 << 2))) {
-        kdebug(" - setting secondary channel to ISA compatibility mode");
-        prog_if &= ~(1 << 2);
+    uint8_t intpin = pci_cfg_read_byte(dev->bus, dev->dev, dev->func, PCI_CFG_H0_IRQ_PIN); // intpin = 0 indicates no PCI native mode interrupts
+    kdebug(" - PCI interrupt pin: 0x%x", intpin);
+    if(intpin) {
+        /* PCI native mode interrupt is available */
+        if((prog_if & ((1 << 0) | (1 << 1))) == (1 << 1)) {
+            kdebug(" - setting primary channel to PCI native mode");
+            prog_if |= (1 << 0);
+        }
+        if((prog_if & ((1 << 2) | (1 << 3))) == (1 << 3)) {
+            kdebug(" - setting secondary channel to PCI native mode");
+            prog_if |= (1 << 2);
+        }
+    } else {
+        /* only ISA compatibility mode interrupt is available */
+        if((prog_if & ((1 << 0) | (1 << 1))) == ((1 << 0) | (1 << 1))) {
+            kdebug(" - setting primary channel to ISA compatibility mode");
+            prog_if &= ~(1 << 0);
+        }
+        if((prog_if & ((1 << 2) | (1 << 3))) == ((1 << 2) | (1 << 3))) {
+            kdebug(" - setting secondary channel to ISA compatibility mode");
+            prog_if &= ~(1 << 2);
+        }
     }
     if(prog_if != prog_if_orig) {
         kdebug(" - writing new prog IF value 0x%02x", prog_if);
@@ -195,35 +201,42 @@ static bool ide_init(pci_devtree_t* dev) {
         prog_if_orig = prog_if; prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
         if(prog_if != prog_if_orig) {
             kdebug("    - setting Prog IF value failed: readback results in 0x%02x (expected 0x%02x)", prog_if, prog_if_orig);
-            no_irq = true; // we can't live with PCI interrupts just yet
+            no_irq = true;
         }
     }
-    // uint8_t pci_irq_line = 15; // only applicable if PCI native mode is enabled on one of the channels
-    // if(prog_if & ((1 << 0) | (1 << 2))) {
-    //     /* get IRQ line */
-    //     bool disable_pci = false; // set if PCI native mode is to be disabled
-    //     acpi_resource_t rsrc;
-    //     if(lai_pci_route(&rsrc, 0, dev->bus, dev->dev, dev->func)) {
-    //         kerror("cannot route PCI interrupt for device %s", dev->header.name);
-    //         disable_pci = true;
-    //     } else {
-    //         kdebug(" - PCI interrupt routing: base = %u, irq_flags = 0x%x", rsrc.base, rsrc.irq_flags);
-    //         pci_irq_line = rsrc.base;
-    //     }
+    size_t pci_irq_line = (size_t)-1; // only applicable if PCI native mode is enabled on one of the channels
+    if(!no_irq && intpin && (prog_if & ((1 << 0) | (1 << 2)))) {
+        /* get IRQ line */
+        bool disable_pci = false; // set if PCI native mode is to be disabled
+        uint8_t intflags;
+        pci_irq_line = pci_route_irq(dev->bus, dev->dev, dev->func, intpin - 1, &intflags);
+        if(pci_irq_line == (size_t)-1) {
+            kerror("cannot route device %s interrupt pin INT%c", dev->header.name, intpin - 1 + 'A');
+            disable_pci = true;
+        } else {
+            kdebug("device %s interrupt pin INT%c routed to IRQ/GSI %u", dev->header.name, intpin - 1 + 'A', pci_irq_line);
+            if(apic_enabled) ioapic_set_trigger(pci_irq_line, (intflags & PCI_IRQ_EDGE), (intflags & PCI_IRQ_ACTIVE_LOW));
+            else if(pci_irq_line < 16) kwarn("interrupts (IRQ %u) may not work for device %s as APIC is not available", pci_irq_line, dev->header.name);
+            else {
+                /* we have something that's outside of the legacy PIC range (NOTE: could this be a kernel bug?) */
+                kerror("routing device %s interrupt pin INT%c results in invalid IRQ %u", dev->header.name, intpin - 1 + 'A', pci_irq_line);
+                disable_pci = true;
+            }
+        }
 
-    //     if(disable_pci) {
-    //         kerror(" - disabling PCI native mode for device %s (if possible)", dev->header.name);
-    //         if(prog_if & (1 << 1)) prog_if &= ~(1 << 0);
-    //         if(prog_if & (1 << 3)) prog_if &= ~(1 << 2);
-    //         kdebug(" - writing new prog IF value 0x%02x", prog_if);
-    //         pci_write_progif(dev->bus, dev->dev, dev->func, prog_if);
-    //         prog_if_orig = prog_if; prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
-    //         if(prog_if != prog_if_orig) {
-    //             kerror("    - cannot disable PCI native mode (Prog IF readback got 0x%02x, expected 0x%02x) - disabling interrupts", prog_if, prog_if_orig);
-    //             no_irq = true;
-    //         }
-    //     }
-    // }
+        if(disable_pci) {
+            kerror(" - disabling PCI native mode for device %s (if possible)", dev->header.name);
+            if(prog_if & (1 << 1)) prog_if &= ~(1 << 0);
+            if(prog_if & (1 << 3)) prog_if &= ~(1 << 2);
+            kdebug(" - writing new prog IF value 0x%02x", prog_if);
+            pci_write_progif(dev->bus, dev->dev, dev->func, prog_if);
+            prog_if_orig = prog_if; prog_if = pci_read_progif(dev->bus, dev->dev, dev->func);
+            if(prog_if != prog_if_orig) {
+                kerror("    - cannot disable PCI native mode (Prog IF readback got 0x%02x, expected 0x%02x) - disabling interrupts", prog_if, prog_if_orig);
+                no_irq = true;
+            }
+        }
+    }
 
     /* enumerate channels */
     ide_channel_devtree_t* channels = kcalloc(2, sizeof(ide_channel_devtree_t));
@@ -233,6 +246,7 @@ static bool ide_init(pci_devtree_t* dev) {
     }
 
     for(size_t ch = 0; ch < 2; ch++) {
+        channels[ch].next = ide_first_channel; ide_first_channel = &channels[ch];
         channels[ch].header.size = sizeof(ide_channel_devtree_t);
         channels[ch].header.type = DEVTREE_NODE_BUS;
         ksprintf(channels[ch].header.name, "ch%u", ch);
@@ -267,43 +281,49 @@ static bool ide_init(pci_devtree_t* dev) {
 
     if(!no_irq) {
         /* set up interrupts */
-        // if(prog_if & ((1 << 0) | (1 << 2))) {
-        //     /* set up PCI native mode interrupt */
-        //     kdebug(" - PCI native mode interrupt line: %u", pci_irq_line);
-        //     ide_irq_channels[pci_irq_line] = &channels[0]; // it doesn't really matter which channel we set here as long as it's from the same device
-        //     pic_handle(pci_irq_line, &ide_pci_irq_handler);
-        //     pic_unmask(pci_irq_line);
-        // }
+        if(pci_irq_line != (size_t)-1) {
+            /* set up PCI native mode interrupt */
+            kdebug(" - PCI native mode interrupt line: %u", pci_irq_line);
+            if(apic_enabled) {
+                ioapic_handle(pci_irq_line, &ide_pci_irq_handler);
+                ioapic_unmask(pci_irq_line);
+            } else {
+                pic_handle(pci_irq_line, &ide_pci_irq_handler);
+                pic_unmask(pci_irq_line);
+            }
+            if(prog_if & (1 << 0)) channels[0].irq_line = pci_irq_line;
+            if(prog_if & (1 << 2)) channels[1].irq_line = pci_irq_line;
+        }
 
-        if(!(prog_if & (1 << 0))) {
+        if(!intpin || !(prog_if & (1 << 0))) {
             /* set up ISA compatibility mode interrupt for primary channel */
             kdebug(" - primary channel compatibility mode interrupt line: %u", IDE_PRI_IRQ_LINE);
             if(apic_enabled) {
                 /* use APIC */
                 ioapic_handle(ioapic_irq_gsi[IDE_PRI_IRQ_LINE], &ide_compat_irq_handler);
                 ioapic_unmask(ioapic_irq_gsi[IDE_PRI_IRQ_LINE]);
-                ide_irq_channels[ioapic_irq_gsi[IDE_PRI_IRQ_LINE]] = &channels[0];
+                channels[0].irq_line = ioapic_irq_gsi[IDE_PRI_IRQ_LINE];
             } else {
                 /* use legacy PIC */
                 pic_handle(IDE_PRI_IRQ_LINE, &ide_compat_irq_handler);
                 pic_unmask(IDE_PRI_IRQ_LINE);
-                ide_irq_channels[IDE_PRI_IRQ_LINE] = &channels[0];
+                channels[0].irq_line = IDE_PRI_IRQ_LINE;
             }
         }
 
-        if(!(prog_if & (1 << 2))) {
+        if(!intpin || !(prog_if & (1 << 2))) {
             /* set up ISA compatibility mode interrupt for secondary channel */
             kdebug(" - secondary channel compatibility mode interrupt line: %u", IDE_SEC_IRQ_LINE);
             if(apic_enabled) {
                 /* use APIC */
                 ioapic_handle(ioapic_irq_gsi[IDE_SEC_IRQ_LINE], &ide_compat_irq_handler);
                 ioapic_unmask(ioapic_irq_gsi[IDE_SEC_IRQ_LINE]);
-                ide_irq_channels[ioapic_irq_gsi[IDE_SEC_IRQ_LINE]] = &channels[1];
+                channels[1].irq_line = ioapic_irq_gsi[IDE_SEC_IRQ_LINE];
             } else {
                 /* use legacy PIC */
                 pic_handle(IDE_SEC_IRQ_LINE, &ide_compat_irq_handler);
                 pic_unmask(IDE_SEC_IRQ_LINE);
-                ide_irq_channels[IDE_SEC_IRQ_LINE] = &channels[1];
+                channels[1].irq_line = IDE_SEC_IRQ_LINE;
             }
         }
 

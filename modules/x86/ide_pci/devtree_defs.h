@@ -30,14 +30,16 @@ typedef struct {
 } ide_dev_devtree_t;
 
 /* IDE channel node */
-typedef struct {
+typedef struct ide_channel_devtree {
     devtree_t header;
     uint16_t io_base; // IO
     uint16_t ctrl_base; // control
     uint16_t bmide_base; // bus master IDE
     uint8_t selected_drv; // last selected drive
+    uint8_t irq_line; // IRQ line number (PIC IRQ/APIC GSI)
     mutex_t irq_block; // this mutex is acquired by the I/O function before waiting for interrupts, then released by the IRQ handler while the function re-acquires the mutex
     mutex_t access; // mutex for blocking channel access
+    struct ide_channel_devtree* next; // next channel (all channels form a singly linked list)
 } ide_channel_devtree_t;
 
 #endif
