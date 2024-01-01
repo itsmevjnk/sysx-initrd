@@ -4,7 +4,7 @@
 
 ide_channel_devtree_t* ide_first_channel = NULL;
 
-void ide_pci_irq_handler(uint8_t irq, void* context) {
+void ide_pci_irq_handler(size_t irq, void* context) {
     (void) context;
 
     // kdebug("PCI native mode interrupt %u", irq);
@@ -35,7 +35,7 @@ void ide_pci_irq_handler(uint8_t irq, void* context) {
     }
 }
 
-void ide_compat_irq_handler(uint8_t irq, void* context) {
+void ide_compat_irq_handler(size_t irq, void* context) {
     (void) context;
 
     // kdebug("ISA compatibility mode interrupt %u", irq);

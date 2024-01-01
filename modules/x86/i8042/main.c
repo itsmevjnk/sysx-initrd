@@ -75,7 +75,7 @@ static void ps2_kbd_handler(uint8_t port, uint8_t data) {
 
 /* PS/2 DEVICE INCOMING DATA IRQ HANDLER */
 
-static void ps2_irq_handler(uint8_t irq, void* context) {
+static void ps2_irq_handler(size_t irq, void* context) {
     (void) context;
     uint8_t port = (irq == ps2_p2_irq) ? 1 : 0;
     uint8_t data = inb(PS2_IO_DATA); // read data from controller
